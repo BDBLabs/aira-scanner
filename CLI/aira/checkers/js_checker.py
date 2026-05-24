@@ -393,8 +393,8 @@ class JSChecker:
     # ── CHECK 11: Deterministic Reasoning Drift ───────────────────
     def _check_determinism(self):
         patterns = [
-            r'temperature\s*:\s*(?!0(?:\.0+)?)[0-9]+(?:\.[0-9]+)?',
-            r'"temperature"\s*:\s*(?!0(?:\.0+)?)[0-9]+(?:\.[0-9]+)?',
+            r'\btemperature\s*[:=]\s*(?:0?\.\d*[1-9]\d*|[1-9]\d*(?:\.\d+)?)',
+            r'"temperature"\s*:\s*(?:0?\.\d*[1-9]\d*|[1-9]\d*(?:\.\d+)?)',
         ]
         for i, line in enumerate(self.lines, start=1):
             for pattern in patterns:

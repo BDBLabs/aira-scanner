@@ -1,0 +1,7 @@
+[project]
+name = "aira-web-functions"
+version = "0.1.0"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "pyyaml>=6.0",
+]

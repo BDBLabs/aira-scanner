@@ -26,6 +26,26 @@ class DeterministicScanTests(unittest.TestCase):
         self.assertEqual(result["checks"]["exception_handling"], "FAIL")
         self.assertEqual(result["checks"]["audit_integrity"], "FAIL")
 
+    def test_python_deterministic_scan_is_repeatable(self):
+        code = (
+            "def score_record(model, payload):\n"
+            "    return model.predict(payload, temperature=0.7)\n"
+        )
+
+        first = scan_inline_source(code, "python")
+        second = scan_inline_source(code, "python")
+
+        self.assertEqual(first, second)
+        self.assertEqual(first["checks"]["determinism"], "FAIL")
+
+    def test_javascript_decimal_temperature_is_flagged(self):
+        result = scan_inline_source(
+            "const result = client.chat({ temperature: 0.7, messages });\n",
+            "javascript",
+        )
+
+        self.assertEqual(result["checks"]["determinism"], "FAIL")
+
     @unittest.skipUnless(esprima is not None, "esprima parser is not installed")
     def test_javascript_deterministic_scan_uses_ast_rules_when_available(self):
         code = (

@@ -43,11 +43,11 @@ STATUS_COLOR = {"PASS": C.GREEN, "FAIL": C.RED, "UNKNOWN": C.YELLOW}
 FAIL_THRESHOLD = {"none": None, "low": {"LOW", "MEDIUM", "HIGH"}, "medium": {"MEDIUM", "HIGH"}, "high": {"HIGH"}}
 EXIT_OK = 0
 
-# Exit codes: 1 = scan findings exceeded --fail-on; 2 = LLM/research/collection operational failure;
-# 3 = invalid input / nothing scannable / output path errors (distinct from findings for automation).
+# Exit codes: 1 = scan findings exceeded --fail-on; 2 = invalid input / usage / output path errors;
+# 3 = LLM/research/collection operational failure (distinct from findings for automation).
 EXIT_FINDINGS_THRESHOLD = 1
-EXIT_OPERATIONAL_FAILURE = 2
-EXIT_INPUT_OR_USAGE = 3
+EXIT_INPUT_OR_USAGE = 2
+EXIT_OPERATIONAL_FAILURE = 3
 
 BANNER = f"""
 {C.BOLD}{C.BLUE}  ╔═══════════════════════════════════════╗
@@ -292,7 +292,7 @@ def positive_int(flag_label: str):
         except ValueError as exc:
             raise argparse.ArgumentTypeError(f"{flag_label} must be an integer") from exc
         if parsed <= 0:
-            raise argparse.ArgumentTypeError(f"{flag_label} must be a positive integer")
+            raise argparse.ArgumentTypeError(f"{flag_label} must be greater than 0")
         return parsed
 
     return converter
@@ -300,6 +300,13 @@ def positive_int(flag_label: str):
 
 def has_scanner_errors(result) -> bool:
     return any(finding.get("check_id") == "SCANNER" for finding in result.findings)
+
+
+def exit_code_for_llm_error(exc: LLMRoutingError) -> int:
+    message = str(exc)
+    if "No LLM providers are configured" in message or " is not configured" in message:
+        return EXIT_INPUT_OR_USAGE
+    return EXIT_OPERATIONAL_FAILURE
 
 
 def write_text_output(out_file: str, content: str) -> None:
@@ -450,7 +457,8 @@ def main() -> None:
         try:
             validate_scan_target(target_arg)
         except ScanTargetError as exc:
-            print(f"{C.RED}Invalid scan target: {exc}{C.RESET}", file=sys.stderr)
+            prefix = "Path not found: " if "does not exist" in str(exc) else ""
+            print(f"{C.RED}Input error: Invalid scan target: {prefix}{exc}{C.RESET}", file=sys.stderr)
             sys.exit(EXIT_INPUT_OR_USAGE)
 
         resolved_target = target_arg.resolve(strict=False)
@@ -461,19 +469,20 @@ def main() -> None:
             scanner = AIRAScanner(str(resolved_target), exclude_dirs=exclude)
             result = scanner.scan(mode=args.engine, llm_config=llm_config)
         except ScannerInputError as exc:
-            print(f"{C.RED}Input error: {exc}{C.RESET}", file=sys.stderr)
+            label = "Cannot complete scan" if "No supported source files found" in str(exc) else "Input error"
+            print(f"{C.RED}{label}: {exc}{C.RESET}", file=sys.stderr)
             sys.exit(EXIT_INPUT_OR_USAGE)
         except ScannerExecutionError as exc:
             print(f"{C.RED}Scan failed: {exc}{C.RESET}", file=sys.stderr)
             sys.exit(EXIT_OPERATIONAL_FAILURE)
         except LLMRoutingError as exc:
             print(f"{C.RED}LLM scan failed: {exc}{C.RESET}", file=sys.stderr)
-            sys.exit(EXIT_OPERATIONAL_FAILURE)
+            sys.exit(exit_code_for_llm_error(exc))
         except ScanTargetError as exc:
             print(f"{C.RED}Scan aborted: {exc}{C.RESET}", file=sys.stderr)
             sys.exit(EXIT_INPUT_OR_USAGE)
         except Exception as exc:
-            print(f"{C.RED}Scan failed unexpectedly: {exc}{C.RESET}", file=sys.stderr)
+            print(f"{C.RED}Unexpected scan failure: {exc}{C.RESET}", file=sys.stderr)
             sys.exit(EXIT_OPERATIONAL_FAILURE)
 
         empty_reason = describe_empty_scan_result(scanner, result.files_scanned)

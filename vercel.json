@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/static-scan.py": {
+      "excludeFiles": "{.git/**,.vercel/**,aira-scanner/**,CLI/.venv/**,CLI/build/**,CLI/tests/**,CLI/vscode-extension/**,CLI/*.zip,CLI/aira_scanner.egg-info/**,**/__pycache__/**,**/.DS_Store,*.zip}"
+    }
+  }
+}
