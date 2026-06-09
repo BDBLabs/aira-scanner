@@ -71,7 +71,7 @@ def _infer_repo_slug(repo: str) -> str:
 def _repo_checkout_dirname(repo: str) -> str:
     try:
         return _infer_repo_slug(repo).replace("/", "__")
-    except Exception:  # noqa: BLE001
+    except ValueError:
         return _sha256_hex(repo)[:16]
 
 
@@ -286,10 +286,14 @@ def collect_public_repos(
                         manifest_written=manifest_written,
                     )
                 )
-            except Exception as exc:  # noqa: BLE001
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as exc:
                 try:
                     fallback_sample_name = sample.get("sample_name") or f"github:{_infer_repo_slug(repo_label)}"
-                except Exception:  # noqa: BLE001
+                except (KeyboardInterrupt, SystemExit):
+                    raise
+                except Exception:
                     fallback_sample_name = str(sample.get("sample_name") or repo_label or "unresolved-sample")
                 submission_options = {
                     "sample_name": fallback_sample_name,

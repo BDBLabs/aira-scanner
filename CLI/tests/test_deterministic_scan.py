@@ -102,6 +102,7 @@ class DeterministicScanTests(unittest.TestCase):
         ])
 
         self.assertEqual(result["summary"]["files_scanned"], 2)
+        self.assertGreater(result["summary"]["total"], 0)
         self.assertEqual(result["checks"]["success_integrity"], "FAIL")
         self.assertEqual(result["checks"]["audit_integrity"], "FAIL")
         self.assertTrue(any(finding["file"] == "src/service.py" for finding in result["findings"]))

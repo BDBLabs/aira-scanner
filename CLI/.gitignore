@@ -3,3 +3,7 @@ __pycache__/
 .pytest_cache/
 aira-scanner-v1.2.zip
 vscode-extension/
+.venv/
+venv/
+dist/
+build/

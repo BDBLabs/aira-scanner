@@ -82,7 +82,7 @@ def analyze_test_file(filepath: str) -> TestCoverageReport:
             happy += 1
             total += 1
 
-    ratio = (happy / failure) if failure > 0 else float('inf')
+    ratio = (happy / failure) if failure > 0 else 999.0
 
     if ratio > 3.0 or (failure == 0 and total > 0):
         findings.append({

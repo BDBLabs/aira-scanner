@@ -20,13 +20,19 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+try:
+    from aira.checkers.js_checker import JSChecker
+    from aira.checkers.python_checker import PythonChecker
+    from aira.checkers.test_coverage_checker import scan_test_files
+    from aira.llm import LLMConfig, LLMRoutingError, run_llm_json_audit
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from aira.checkers.js_checker import JSChecker
+    from aira.checkers.python_checker import PythonChecker
+    from aira.checkers.test_coverage_checker import scan_test_files
+    from aira.llm import LLMConfig, LLMRoutingError, run_llm_json_audit
 
-from aira.checkers.js_checker import JSChecker
-from aira.checkers.python_checker import PythonChecker
-from aira.checkers.test_coverage_checker import scan_test_files
-from aira.llm import LLMConfig, LLMRoutingError, run_llm_json_audit
-
+from aira import __version__
 
 CHECKS = {
     "C01": ("success_integrity", "SUCCESS INTEGRITY"),
@@ -125,7 +131,7 @@ SKIP_DIRS = {
 }
 
 LLM_SYSTEM_PROMPT = (
-    "You are AIRA — the AI-Induced Risk Audit scanner v1.2. "
+    f"You are AIRA — the AI-Induced Risk Audit scanner v{__version__}. "
     "You audit code for truthful failure handling. Return JSON only."
 )
 
@@ -204,10 +210,6 @@ def _coerce_line_number(value: Any) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
-
-
-def supported_extensions_label() -> str:
-    return ", ".join(sorted(SUPPORTED_EXTENSIONS))
 
 
 def _build_result(
@@ -382,7 +384,7 @@ class AIRAScanner:
                 )
             if self.target.suffix.lower() not in SUPPORTED_EXTENSIONS:
                 raise ScannerInputError(
-                    f"Unsupported file type for scan: {self.target}. Supported extensions: {supported_extensions_label()}"
+                    f"Unsupported file type for scan: {self.target}. Supported extensions: {supported_extensions_hint()}"
                 )
             return [self.target]
         if not self.target.is_dir():
@@ -392,7 +394,7 @@ class AIRAScanner:
         if not files:
             raise ScannerInputError(
                 f"No supported source files found in directory: {self.target}. "
-                f"Supported extensions: {supported_extensions_label()}. "
+                f"Supported extensions: {supported_extensions_hint()}. "
                 "Check the path and --exclude patterns."
             )
         return files
@@ -461,6 +463,7 @@ class AIRAScanner:
         sections: List[str] = []
         total_chars = 0
         truncated = False
+        files_included = 0
 
         for filepath in files:
             rel_path = filepath.name if self.target.is_file() else str(filepath.relative_to(self.target))
@@ -472,20 +475,21 @@ class AIRAScanner:
             if total_chars + len(section) <= max_context_chars:
                 sections.append(section)
                 total_chars += len(section)
+                files_included += 1
                 continue
 
             remaining = max_context_chars - total_chars
             if remaining > 0:
                 snippet = section[:remaining]
                 sections.append(f"{snippet}\n[...truncated for size...]\n")
-                total_chars += len(snippet)
+                files_included += 1
             truncated = True
             break
 
-        return "\n".join(sections), len(files), truncated
+        return "\n".join(sections), files_included, truncated
 
     def _build_llm_prompt(self, combined_source: str) -> str:
-        return f"""Analyze the following code snapshot with AIRA v1.2.
+        return f"""Analyze the following code snapshot with AIRA v{__version__}.
 
 Return ONLY valid JSON in this exact structure:
 {{
@@ -593,7 +597,7 @@ Code snapshot:
 def result_to_yaml(result: ScanResult) -> str:
     doc = {
         "aira_scan": {
-            "version": "1.2",
+            "version": __version__,
             "target": result.target,
             "scanned_at": result.scanned_at,
             "summary": result.summary,
@@ -608,7 +612,7 @@ def result_to_yaml(result: ScanResult) -> str:
 def result_to_json(result: ScanResult) -> str:
     return json.dumps({
         "aira_scan": {
-            "version": "1.2",
+            "version": __version__,
             "target": result.target,
             "scanned_at": result.scanned_at,
             "summary": result.summary,

@@ -62,6 +62,7 @@ class ScannerModeTests(unittest.TestCase):
             result = scanner.scan(mode="static")
 
         self.assertEqual(result.files_scanned, 1)
+        self.assertGreater(result.findings_total, 0)
         self.assertTrue(all(finding["file"] != "skip.py" for finding in result.findings))
         self.assertTrue(any(finding["file"] == "keep.py" for finding in result.findings))
 

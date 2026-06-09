@@ -30,9 +30,21 @@ class handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
+    MAX_PAYLOAD_BYTES = 1_048_576
+
     def do_POST(self):
         try:
-            content_length = int(self.headers.get("Content-Length", "0"))
+            raw_length = self.headers.get("Content-Length", "0")
+            content_length = int(raw_length)
+        except (ValueError, TypeError):
+            self._send_json(400, {"error": {"message": "Invalid Content-Length header."}})
+            return
+
+        if content_length < 0 or content_length > self.MAX_PAYLOAD_BYTES:
+            self._send_json(413, {"error": {"message": f"Payload too large. Maximum: {self.MAX_PAYLOAD_BYTES} bytes."}})
+            return
+
+        try:
             raw = self.rfile.read(content_length).decode("utf-8", errors="replace") if content_length else "{}"
             body = json.loads(raw or "{}")
         except json.JSONDecodeError:

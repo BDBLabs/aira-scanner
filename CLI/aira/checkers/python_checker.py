@@ -177,16 +177,30 @@ class PythonChecker:
 
     # ── CHECK 5: Bypass / Override Paths ─────────────────────────
     def _check_bypass_paths(self):
-        bypass_patterns = [
-            r'\btesting_bypass\b', r'\bskip_router\b', r'\bforce_model_output\b',
-            r'\ballow_degraded\b', r'\bbypass_governance\b', r'\bskip_validation\b',
-            r'\bskip_audit\b', r'\bdisable_checks\b', r'\bforce_pass\b'
-        ]
-        for i, line in enumerate(self.lines, start=1):
-            for pattern in bypass_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    self._add("C05", "BYPASS / OVERRIDE PATHS", "HIGH",
-                              i, f"Potential governance bypass flag detected: '{line.strip()}'")
+        bypass_names = {"testing_bypass", "skip_router", "force_model_output",
+                        "allow_degraded", "bypass_governance", "skip_validation",
+                        "skip_audit", "disable_checks", "force_pass"}
+        for node in ast.walk(self.tree):
+            name = None
+            lineno = 0
+            if isinstance(node, ast.Name) and node.id in bypass_names:
+                name = node.id
+                lineno = node.lineno
+            elif isinstance(node, ast.Attribute) and node.attr in bypass_names:
+                name = node.attr
+                lineno = node.lineno
+            if name:
+                self._add("C05", "BYPASS / OVERRIDE PATHS", "HIGH",
+                          lineno, f"Potential governance bypass flag detected: '{name}'")
+
+    @staticmethod
+    def _iter_returns_in_scope(node):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if isinstance(child, ast.Return):
+                yield child
+            yield from PythonChecker._iter_returns_in_scope(child)
 
     # ── CHECK 6: Ambiguous Return Contracts ───────────────────────
     def _check_ambiguous_returns(self):
@@ -195,14 +209,10 @@ class PythonChecker:
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             none_returns = []
-            for child in ast.walk(node):
-                if child is node:
-                    continue
-                if isinstance(child, ast.Return):
-                    val = child.value
-                    if val is None or (isinstance(val, ast.Constant) and val.value is None):
-                        none_returns.append(getattr(child, 'lineno', node.lineno))
-            # Multiple None returns in same function = likely semantic overload
+            for ret in self._iter_returns_in_scope(node):
+                val = ret.value
+                if val is None or (isinstance(val, ast.Constant) and val.value is None):
+                    none_returns.append(ret.lineno)
             if len(none_returns) >= 2:
                 self._add("C06", "AMBIGUOUS RETURN CONTRACTS", "MEDIUM",
                           node.lineno,
@@ -288,16 +298,14 @@ class PythonChecker:
         for node in ast.walk(self.tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            # Heuristic: function name suggests it produces a result/prediction/assessment
             result_names = {"predict", "assess", "evaluate", "score", "classify",
                             "recommend", "decide", "infer", "generate", "resolve"}
             if not any(kw in node.name.lower() for kw in result_names):
                 continue
-            # Check if any return includes confidence metadata
-            returns = [c for c in ast.walk(node) if isinstance(c, ast.Return) and c is not node]
+            returns = list(self._iter_returns_in_scope(node))
             has_confidence = False
             for ret in returns:
-                src = ast.unparse(ret) if hasattr(ast, 'unparse') else ""
+                src = ast.unparse(ret)
                 if any(term in src.lower() for term in confidence_terms):
                     has_confidence = True
                     break
@@ -340,12 +348,17 @@ class PythonChecker:
 
     # ── CHECK 4: Fallback Scatter ─────────────────────────────────
     def _check_fallback_scatter(self):
-        fallback_patterns = [
-            r'\bfallback\b', r'\bdegraded\b', r'\bbest.?effort\b',
-            r'\bfallback_mode\b', r'\buse_fallback\b'
-        ]
-        for i, line in enumerate(self.lines, start=1):
-            for pattern in fallback_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    self._add("C04", "DISTRIBUTED FALLBACK / DEGRADED EXECUTION", "LOW",
-                              i, f"Fallback/degraded logic detected — verify centralized governance: '{line.strip()}'")
+        fallback_names = {"fallback", "degraded", "best_effort", "best_effort",
+                          "fallback_mode", "use_fallback", "fail_open"}
+        for node in ast.walk(self.tree):
+            name = None
+            lineno = 0
+            if isinstance(node, ast.Name) and node.id in fallback_names:
+                name = node.id
+                lineno = node.lineno
+            elif isinstance(node, ast.Attribute) and node.attr in fallback_names:
+                name = node.attr
+                lineno = node.lineno
+            if name:
+                self._add("C04", "DISTRIBUTED FALLBACK / DEGRADED EXECUTION", "LOW",
+                          lineno, f"Fallback/degraded logic detected — verify centralized governance: '{name}'")

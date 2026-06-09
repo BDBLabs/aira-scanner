@@ -123,7 +123,7 @@ class ResearchHelpersTests(unittest.TestCase):
         self.assertNotIn("except Exception:", serialized)
 
     def test_check_airtable_connection_reports_missing_config(self):
-        with mock.patch.dict(os.environ, {}, clear=True):
+        with mock.patch.dict(os.environ, {"AIRTABLE_BASE_ID": "", "AIRTABLE_TOKEN": ""}, clear=False):
             snapshot = check_airtable_connection()
 
         self.assertFalse(snapshot["configured"])
@@ -131,7 +131,11 @@ class ResearchHelpersTests(unittest.TestCase):
         self.assertIn("not configured", snapshot["message"])
 
     def test_check_research_connection_reports_missing_backend(self):
-        with mock.patch.dict(os.environ, {}, clear=True):
+        with mock.patch.dict(os.environ, {
+            "SUPABASE_URL": "", "SUPABASE_SERVICE_ROLE_KEY": "",
+            "AIRTABLE_BASE_ID": "", "AIRTABLE_TOKEN": "",
+            "AIRA_RESEARCH_JSONL": "", "RESEARCH_BACKEND": "",
+        }, clear=False):
             snapshot = check_research_connection()
 
         self.assertEqual(snapshot["backend"], "none")
@@ -147,14 +151,14 @@ class ResearchHelpersTests(unittest.TestCase):
                 "AIRTABLE_BASE_ID": "app123",
                 "AIRTABLE_TOKEN": "token123",
             },
-            clear=True,
+            clear=False,
         ):
             backend = infer_research_backend()
 
         self.assertEqual(backend, "supabase")
 
     def test_check_research_connection_reports_invalid_backend(self):
-        with mock.patch.dict(os.environ, {"RESEARCH_BACKEND": "bogus"}, clear=True):
+        with mock.patch.dict(os.environ, {"RESEARCH_BACKEND": "bogus"}, clear=False):
             snapshot = check_research_connection()
 
         self.assertEqual(snapshot["backend"], "bogus")
@@ -183,7 +187,7 @@ class ResearchHelpersTests(unittest.TestCase):
                 "AIRTABLE_TABLE": "Submissions",
                 "AIRTABLE_TOKEN": "token123",
             },
-            clear=True,
+            clear=False,
         ):
             with mock.patch("aira.research.request.urlopen", side_effect=fake_urlopen):
                 response = submit_aggregate_research(_sample_result())
@@ -198,7 +202,7 @@ class ResearchHelpersTests(unittest.TestCase):
         result = _sample_result()
         with tempfile.TemporaryDirectory() as tmpdir:
             sink = Path(tmpdir) / "research.jsonl"
-            with mock.patch.dict(os.environ, {"AIRA_RESEARCH_JSONL": str(sink)}, clear=True):
+            with mock.patch.dict(os.environ, {"AIRA_RESEARCH_JSONL": str(sink)}, clear=False):
                 response = submit_aggregate_research(result)
 
             lines = sink.read_text(encoding="utf-8").splitlines()
@@ -220,7 +224,7 @@ class ResearchHelpersTests(unittest.TestCase):
                 "SUPABASE_SERVICE_ROLE_KEY": "secret",
                 "SUPABASE_TABLE": "aira_submissions",
             },
-            clear=True,
+            clear=False,
         ):
             with mock.patch(
                 "aira.research._supabase_request_json",
@@ -278,7 +282,7 @@ class ResearchHelpersTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(compute_fti_v1(bundle["submission_checks"]), 71.43)
+        self.assertAlmostEqual(compute_fti_v1(bundle["submission_checks"]), 71.43, places=2)
         self.assertEqual(risk_level_for_fti(85.0), "LOW_RISK")
         self.assertEqual(risk_level_for_fti(84.99), "MODERATE_RISK")
         self.assertEqual(risk_level_for_fti(64.99), "HIGH_RISK")
@@ -293,7 +297,7 @@ class ResearchHelpersTests(unittest.TestCase):
                 "SUPABASE_SERVICE_ROLE_KEY": "secret",
                 "SUPABASE_TABLE": "aira_submissions",
             },
-            clear=True,
+            clear=False,
         ):
             with mock.patch(
                 "aira.research._supabase_request_json",

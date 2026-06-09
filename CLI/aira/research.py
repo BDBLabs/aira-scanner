@@ -60,9 +60,6 @@ VALID_SOURCE_KINDS = {"repo", "directory", "dataset_file", "dataset_repo", "ci_r
 VALID_CHECK_STATUSES = {"PASS", "FAIL", "UNKNOWN"}
 DEFAULT_SCORING_VERSION = "fti-v1"
 CHECK_IDS = tuple(CHECKS.keys())
-CHECK_KEYS = tuple(key for _, (key, _) in CHECKS.items())
-CHECK_ID_BY_KEY = {key: check_id for check_id, (key, _) in CHECKS.items()}
-CHECK_NAME_BY_KEY = {key: label for _, (key, label) in CHECKS.items()}
 FTI_V1_WEIGHTS_BY_KEY = {
     "success_integrity": 3,
     "audit_integrity": 3,

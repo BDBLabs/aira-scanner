@@ -105,7 +105,16 @@ class CliFailureBehaviorTests(unittest.TestCase):
             target = Path(tmpdir) / "safe.py"
             target.write_text("print('safe')\n", encoding="utf-8")
 
-            with mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch.dict(os.environ, {
+                "AIRA_OPENAI_BASE_URL": "", "OPENAI_BASE_URL": "",
+                "AIRA_OPENAI_MODEL": "", "OPENAI_MODEL": "",
+                "AIRA_OPENAI_API_KEY": "", "OPENAI_API_KEY": "",
+                "AIRA_OLLAMA_MODEL": "", "OLLAMA_MODEL": "",
+                "AIRA_GROQ_API_KEY": "", "GROQ_API_KEY": "",
+                "AIRA_GEMINI_API_KEY": "", "GEMINI_API_KEY": "",
+                "GOOGLE_API_KEY": "",
+                "AIRA_OPENROUTER_API_KEY": "", "OPENROUTER_API_KEY": "",
+            }, clear=False):
                 code, stdout, stderr = _run_cli(["aira", "scan", str(target), "--engine", "llm", "--output", "json"])
 
         self.assertEqual(code, 2)

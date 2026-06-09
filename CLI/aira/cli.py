@@ -10,21 +10,37 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from aira.llm import LLMConfig, LLMRoutingError, provider_health_snapshot
-from aira.collector import collect_public_repos
-from aira.research import ResearchSubmissionError, check_research_connection, submit_aggregate_research
-from aira.scanner import (
-    AIRAScanner,
-    ScanTargetError,
-    ScannerExecutionError,
-    ScannerInputError,
-    describe_empty_scan_result,
-    result_to_json,
-    result_to_yaml,
-    validate_scan_target,
-)
+try:
+    from aira import __version__
+    from aira.llm import LLMConfig, LLMRoutingError, provider_health_snapshot
+    from aira.collector import collect_public_repos
+    from aira.research import ResearchSubmissionError, check_research_connection, submit_aggregate_research
+    from aira.scanner import (
+        AIRAScanner,
+        ScanTargetError,
+        ScannerExecutionError,
+        ScannerInputError,
+        describe_empty_scan_result,
+        result_to_json,
+        result_to_yaml,
+        validate_scan_target,
+    )
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from aira import __version__
+    from aira.llm import LLMConfig, LLMRoutingError, provider_health_snapshot
+    from aira.collector import collect_public_repos
+    from aira.research import ResearchSubmissionError, check_research_connection, submit_aggregate_research
+    from aira.scanner import (
+        AIRAScanner,
+        ScanTargetError,
+        ScannerExecutionError,
+        ScannerInputError,
+        describe_empty_scan_result,
+        result_to_json,
+        result_to_yaml,
+        validate_scan_target,
+    )
 
 
 class C:
@@ -51,7 +67,7 @@ EXIT_OPERATIONAL_FAILURE = 3
 
 BANNER = f"""
 {C.BOLD}{C.BLUE}  ╔═══════════════════════════════════════╗
-  ║   AIRA — AI-Induced Risk Audit v1.2   ║
+  ║   AIRA — AI-Induced Risk Audit v{__version__}   ║
   ║   Bagelle Parris Vargas Consulting    ║
   ╚═══════════════════════════════════════╝{C.RESET}
 """
@@ -449,8 +465,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    if args.command is None:
-        parser.error("a command is required")
 
     if args.command == "scan":
         target_arg = Path(args.target).expanduser()
