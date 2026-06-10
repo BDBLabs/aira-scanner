@@ -4,6 +4,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
 from aira.llm import LLMConfig, LLMRoutingError
 from aira.scanner import AIRAScanner, ScannerInputError
 
@@ -256,3 +259,110 @@ class ScannerModeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+_VALID_STATEMENTS = [
+    "x = 1",
+    "y = 2 + 3",
+    "print('hello')",
+    "pass",
+    "import os",
+    "from pathlib import Path",
+    "a = [1, 2, 3]",
+    "b = {'key': 'value'}",
+    "c = (x for x in range(5))",
+    "if True:\n    pass",
+    "for i in range(10):\n    pass",
+    "while False:\n    break",
+    "def f():\n    return 1",
+    "class C:\n    pass",
+]
+
+_FAIL_SOFT_STATEMENTS = [
+    "try:\n    x = 1\nexcept:\n    pass",
+    "def g():\n    try:\n        pass\n    except Exception:\n        return True",
+    "skip_validation = True",
+    "task = asyncio.create_task(foo())",
+    "def predict():\n    return {'result': 42}",
+]
+
+
+class PropertyBasedScannerTests(unittest.TestCase):
+
+    @given(st.lists(st.sampled_from(_VALID_STATEMENTS), min_size=1, max_size=50))
+    @settings(max_examples=100)
+    def test_static_scan_succeeds_on_any_valid_python_syntax(self, statements):
+        code = "\n".join(statements)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "sample.py"
+            target.write_text(code, encoding="utf-8")
+            result = AIRAScanner(str(target)).scan(mode="static")
+        self.assertIn("files_scanned", result.summary)
+        self.assertEqual(result.files_scanned, 1)
+
+    @given(
+        st.lists(
+            st.tuples(
+                st.sampled_from(_FAIL_SOFT_STATEMENTS),
+                st.booleans(),
+            ),
+            min_size=1,
+            max_size=10,
+        )
+    )
+    @settings(max_examples=100)
+    def test_static_scan_detects_fail_soft_patterns_when_present(self, statements_with_use):
+        code = "\n".join(stmt for stmt, use in statements_with_use if use)
+        if not code.strip():
+            code = "\n".join(stmt for stmt, _ in statements_with_use)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "sample.py"
+            target.write_text(code, encoding="utf-8")
+            result = AIRAScanner(str(target)).scan(mode="static")
+        self.assertIsInstance(result.findings, list)
+
+    @given(
+        st.lists(st.sampled_from(_VALID_STATEMENTS), min_size=1, max_size=20),
+        st.lists(st.text(min_size=1, max_size=10, alphabet="abcdefghijklmnopqrstuvwxyz"), min_size=1, max_size=5, unique=True),
+    )
+    @settings(max_examples=100)
+    def test_exclude_dirs_never_includes_excluded_files_in_findings(self, statements, exclude_names):
+        code = "\n".join(statements)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            excluded_files = []
+            for name in exclude_names:
+                if not name:
+                    continue
+                fname = f"{name}.py"
+                (root / fname).write_text(code, encoding="utf-8")
+                excluded_files.append(fname)
+            ensure_file = root / "ensure.py"
+            ensure_file.write_text("x = 1\n", encoding="utf-8")
+            if not excluded_files:
+                return
+            result = AIRAScanner(str(root), exclude_dirs=excluded_files).scan(mode="static")
+        excluded_set = set(excluded_files)
+        for finding in result.findings:
+            self.assertNotIn(finding["file"], excluded_set)
+
+    @given(st.lists(st.sampled_from(_VALID_STATEMENTS + _FAIL_SOFT_STATEMENTS), min_size=1, max_size=30))
+    @settings(max_examples=100)
+    def test_static_scan_never_returns_empty_check_results_keys(self, statements):
+        code = "\n".join(statements)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "sample.py"
+            target.write_text(code, encoding="utf-8")
+            result = AIRAScanner(str(target)).scan(mode="static")
+        self.assertIsInstance(result.check_results, dict)
+        self.assertGreater(len(result.check_results), 0)
+        required = {
+            "success_integrity", "audit_integrity", "exception_handling",
+            "fallback_control", "bypass_controls", "return_contracts",
+            "logic_consistency", "background_tasks", "environment_safety",
+            "startup_integrity", "determinism", "lineage",
+            "confidence_representation", "test_coverage_symmetry", "idempotency_safety",
+        }
+        actual_keys = set(result.check_results.keys())
+        missing = required - actual_keys
+        self.assertSetEqual(missing, set(), f"Missing check result keys: {missing}")

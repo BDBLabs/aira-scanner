@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**AIRA Scanner** (AI-Induced Risk Audit) is a research tool for detecting fail-soft patterns in software systems—especially those developed with significant AI assistance.
+**AIRA Scanner** (AI-Induced Risk Audit) is a research tool for detecting fail-soft patterns in software systems — especially those developed with significant AI assistance.
 
 **Core Question**: "Does the system tell the truth when it fails?"
 
@@ -14,8 +14,8 @@ AIRA identifies systems that:
 
 **Key Facts:**
 - Command-line linter + rule engine
-- Detects ~15+ fail-soft pattern categories
-- Works on Python codebases
+- Detects 15 fail-soft pattern categories (C01–C15)
+- Works on Python, JavaScript, and TypeScript codebases
 - Published as `aira-scanner` on PyPI and Homebrew
 - Research-driven: empirical validation in progress
 
@@ -23,76 +23,74 @@ AIRA identifies systems that:
 
 ```
 aira-scanner/
-├── aira/                             # Main package
-│   ├── rules/                        # Detection rule definitions
-│   │   ├── success_integrity.py      # Returns success despite failure
-│   │   ├── exception_suppression.py  # Silent exception swallowing
-│   │   ├── audit_gaps.py             # Missing audit/evidence trails
-│   │   ├── fallback_degradation.py   # Silent fallback behavior
-│   │   ├── bypass_overrides.py       # Escape hatches + overrides
-│   │   ├── return_contracts.py       # Ambiguous return semantics
-│   │   ├── parallel_drift.py         # Logic inconsistency across calls
-│   │   ├── background_tasks.py       # Unsupervised background work
-│   │   ├── startup_integrity.py      # Startup validation gaps
-│   │   ├── environment_drift.py      # Env-dependent behavior
-│   │   ├── determinism_drift.py      # Non-deterministic reasoning
-│   │   ├── lineage_gaps.py           # Missing source→output tracing
-│   │   ├── confidence_misrepresent.py # Overstated confidence
-│   │   ├── test_asymmetry.py         # Untested failure paths
-│   │   └── retry_idempotency.py      # Retry/idempotency assumptions
-│   ├── scanner.py                    # Main scanning engine
-│   ├── ast_utils.py                  # Python AST traversal helpers
-│   ├── reporter.py                   # Result formatting + output
-│   ├── config.py                     # Configuration management
-│   └── __main__.py                   # CLI entry point
-├── tests/                            # Test suite
-│   ├── fixtures/                     # Code samples for testing rules
-│   ├── test_scanner.py               # Integration tests
-│   └── test_rules.py                 # Individual rule tests
-├── docs/                             # Documentation
-│   ├── PATTERNS.md                   # Detailed pattern definitions
-│   ├── USAGE.md                      # Command-line usage guide
-│   ├── RULE_DEVELOPMENT.md           # How to write new rules
-│   └── RESEARCH.md                   # Research methodology + findings
-├── examples/                         # Example codebases + findings
+├── CLI/                              # Scanner CLI + package
+│   ├── aira/                         # Main package
+│   │   ├── checkers/                 # Detection rule implementations
+│   │   │   ├── python_checker.py     # Python AST-backed static checks
+│   │   │   ├── js_checker.py         # JavaScript/TypeScript checks
+│   │   │   └── test_coverage_checker.py  # Test coverage asymmetry (C14)
+│   │   ├── scanner.py                # Core scanning engine (AIRAScanner)
+│   │   ├── cli.py                    # CLI entry point + arg parsing
+│   │   ├── __main__.py               # Entry point → cli.py:main()
+│   │   ├── research.py               # Research submission (Supabase/Airtable/JSONL)
+│   │   ├── llm.py                    # LLM provider routing
+│   │   ├── collector.py              # Public repo collection
+│   │   ├── deterministic_scan.py     # Server-side inline scan helpers
+│   │   └── __init__.py               # Package init (version)
+│   └── tests/                        # Test suite
+│       ├── test_scanner_modes.py     # Scanner mode + edge-case tests
+│       ├── test_research.py          # Research submission tests
+│       ├── test_cli_scan_validation.py  # CLI validation tests
+│       ├── test_cli_failure_behavior.py # CLI failure mode tests
+│       ├── test_llm_routing.py       # LLM provider routing tests
+│       ├── test_deterministic_scan.py   # Deterministic scan tests
+│       ├── test_collector.py         # Collection tests
+│       └── fixture_violations.py     # Test fixtures
+├── api/                              # Web API (Vercel serverless)
+├── docs/                             # Documentation (web-facing)
+├── Formula/                          # Homebrew formula
+├── lib/                              # Shared libraries
+├── scripts/                          # Build + CI scripts
+├── pyproject.toml                    # Project configuration
 ├── ROADMAP.md                        # Feature roadmap
 ├── CONTRIBUTING.md                   # Contribution guidelines
-├── AIRTABLE_SCHEMA.md                # Airtable findings database
+├── AIRTABLE_SCHEMA.md                # Legacy Airtable findings database
 ├── CHANGELOG.md                      # Version history
-└── README.md                         # Quick start
+├── README.md                         # Quick start
+├── LICENSE                           # MIT
+└── .gitignore
 ```
 
-## Fail-Soft Pattern Categories
+## Fail-Soft Pattern Categories (C01–C15)
 
-### 1. Success Integrity Violations
-System returns HTTP 200 / success code despite operation failure.
+### C01 — Success Integrity Violations
+System returns success code despite operation failure.
 
-**Example** (from TrueTraining audit):
+**Example**:
 ```python
-# Register endpoint returns 201 even when duplicate email + wrong password
-if existing_user and password_wrong:
-    token = _create_token(uuid.uuid4(), ...)  # Fake user_id!
-    return TokenResponse(access_token=token)  # ✗ Success despite auth failure
+try:
+    db.insert(record)
+except Exception:
+    return True  # ✗ Returns success after failure
 ```
 
-**AIRA Detection**: Looks for success returns in exception handlers or post-failure branches.
+**AIRA Detection**: Flags `return True` / success-shaped dicts inside exception handlers.
 
-### 2. Audit & Evidence Integrity Gaps
+### C02 — Audit & Evidence Integrity Gaps
 System fails to record evidence of decision or operation outcome.
 
 **Example**:
 ```python
-# Governance audit consumer never persists events due to indentation bug
-async for msg_id, data in bus.subscribe(...):
-    # Extract data
-    pass  # Loop ends here
-# DB insert OUTSIDE loop = never executes = zero audit events
+try:
+    audit_write(event)
+except Exception:
+    pass  # ✗ Evidence silently lost
 ```
 
-**AIRA Detection**: Looks for audit/logging calls that may not execute, missing transaction boundaries, unacked messages.
+**AIRA Detection**: Flags audit/write calls in try blocks with non-re-raising handlers.
 
-### 3. Broad Exception Suppression
-Catch-all `except:` or `except Exception:` with no propagation or logging.
+### C03 — Broad Exception Suppression
+Catch-all `except:` or `except Exception:` with no propagation.
 
 **Example**:
 ```python
@@ -102,331 +100,202 @@ except:
     pass  # ✗ Silent failure
 ```
 
-**AIRA Detection**: Flags bare `except:` clauses and exception handlers without logging.
+**AIRA Detection**: Flags bare excepts and broad Exception handlers that don't re-raise.
 
-### 4. Fallback & Degradation
+### C04 — Fallback & Degradation
 System silently falls back to unsafe defaults instead of failing.
 
-**Example**:
-```python
-# Event publishing fails but caller thinks it succeeded
-try:
-    await bus.publish(event)
-except:
-    logger.error("publish failed")
-    # But route still returns HTTP 201 (Created)
-```
+**AIRA Detection**: Flags `fallback`, `degraded`, `best_effort`, `fail_open` identifiers.
 
-**AIRA Detection**: Looks for `fail_open` patterns, silent retry logic, unchecked fallback branches.
+### C05 — Bypass & Override Paths
+Escape hatches that weaken guarantees (testing, debug, force flags).
 
-### 5. Bypass & Override Paths
-Escape hatches for "testing" or "debugging" that weaken guarantees.
+**AIRA Detection**: Flags `skip_validation`, `bypass_governance`, `force_pass`, etc.
 
-**Example**:
-```python
-if os.getenv("SKIP_GOVERNANCE"):  # ✗ Env-var bypass
-    return decision  # Skip all integrity checks
-```
-
-**AIRA Detection**: Flags environment-variable gates on safety-critical code.
-
-### 6. Ambiguous Return Contracts
+### C06 — Ambiguous Return Contracts
 Function return types don't distinguish success/failure cases.
 
-**Example**:
-```python
-def process():
-    try:
-        return compute()
-    except:
-        return None  # ✗ Ambiguous: None = computed None, or error?
-```
+**AIRA Detection**: Flags functions with ≥2 `return None` in different contexts.
 
-**AIRA Detection**: Looks for Optional returns from functions that may fail.
+### C07 — Parallel Logic Drift
+Same operation implemented differently in different code paths. **Human review only.**
 
-### 7. Parallel Logic Drift
-Same operation implemented differently in different code paths.
-
-**Example**:
-```python
-# Tenant isolation enforced via RLS in DB, but also in middleware
-# If one fails silently, the other may not catch it
-```
-
-**AIRA Detection**: Looks for redundant safety checks that may have diverged.
-
-### 8. Unsupervised Background Tasks
+### C08 — Unsupervised Background Tasks
 Async/background work with no monitoring or result collection.
 
-**Example**:
-```python
-# Fire-and-forget celery task
-process_document_task.delay(...)  # ✗ No error handling
-```
+**AIRA Detection**: Flags `create_task()`, `ensure_future()` fire-and-forget calls.
 
-**AIRA Detection**: Looks for `task.delay()` or `create_task()` without error handlers.
+### C09 — Environment-Dependent Safety Drift
+Safety behavior changes based on debug/dev/staging environment variables.
 
-### 9. Startup Integrity Weaknesses
-Configuration validation missing at startup (fails at runtime instead).
+**AIRA Detection**: Regex-based scan for env-conditional safety bypasses.
 
-**Example**:
-```python
-# API_KEY not validated at __init__, fails at first API call
-self._api_key = os.getenv("OPENAI_API_KEY", "")  # ✗ Empty string allowed
-```
+### C10 — Startup Integrity Weaknesses
+Configuration validation missing at startup (fails at runtime).
 
-**AIRA Detection**: Looks for missing validation on critical config/dependencies.
+**AIRA Detection**: Flags non-re-raising except handlers in startup/init functions.
 
-### 10. Environment-Dependent Safety Drift
-Safety behavior changes based on ENVIRONMENT variable.
+### C11 — Determinism Drift
+Non-deterministic reasoning (non-zero temperature in model calls).
 
-**Example**:
-```python
-if ENVIRONMENT != "production":
-    skip_governance_checks()  # ✗ Dev-only bypass that might escape
-```
+**AIRA Detection**: Regex-based scan for temperature settings in AI call sites.
 
-**AIRA Detection**: Flags conditional security/safety logic.
+### C12 — Source-to-Output Lineage Gaps
+Missing tracing of where output came from. **Human review only.**
 
-### 11. Determinism Drift
-Non-deterministic reasoning (RNG, timing) without seeding.
+### C13 — Confidence Misrepresentation
+System claims result without confidence/certainty metadata.
 
-**Example**:
-```python
-choice = random.choice(options)  # ✗ Can't reproduce failures
-```
+**AIRA Detection**: Flags predict/assess/classify functions without confidence fields.
 
-**AIRA Detection**: Looks for `random`, `time.now()` without seeding.
+### C14 — Test Coverage Asymmetry
+Happy-path tested, error paths untested.
 
-### 12. Source-to-Output Lineage Gaps
-Missing tracing of where output came from / what data influenced decision.
+**AIRA Detection**: `scan_test_files()` analyzes test files for coverage gaps.
 
-**Example**:
-```python
-# Response includes synthesized data but original sources not linked
-return {"summary": generated_text}  # ✗ No source attribution
-```
+### C15 — Retry & Idempotency Assumption Drift
+Retry logic near write operations without idempotency keys.
 
-**AIRA Detection**: Looks for data transformations without provenance tracking.
-
-### 13. Confidence Misrepresentation
-System claims high confidence but based on weak evidence.
-
-**Example**:
-```python
-# Scores averaged without weighting importance
-avg_score = sum(scores) / len(scores)  # ✗ Treats all scores equally
-```
-
-**AIRA Detection**: Looks for confidence aggregation without evidence strength weighting.
-
-### 14. Failure-Path Test Asymmetry
-Happy-path tested extensively, error paths untested.
-
-**Example**:
-```python
-# Route has 10 happy-path tests, 0 error case tests
-@router.post("/items")
-async def create_item(...):  # ✓ Tested
-    # But error handling never tested
-```
-
-**AIRA Detection**: Looks for exception handlers and error branches in untested code.
-
-### 15. Retry & Idempotency Assumption Drift
-Code assumes operations are idempotent but doesn't verify.
-
-**Example**:
-```python
-# Message may be retried, but deduplication not checked
-async for msg_id, data in bus.subscribe(...):
-    await db.execute(insert(...))  # ✗ No idempotency check
-    await bus.ack(...)
-```
-
-**AIRA Detection**: Looks for message consumers without deduplication checks.
+**AIRA Detection**: Regex-based scan for retry + write without idempotency safeguards.
 
 ## Development Workflow
 
 ### Setup
 ```bash
-cd ~/Documents/GitHub/aira-scanner
-
-# Install in development mode
+cd CLI/
 pip install -e ".[dev]"
-
-# Or with uv
-uv sync --extra dev
+# or: uv sync --extra dev
 ```
 
 ### Running the Scanner
 ```bash
 # Scan a single file
-aira scan my_file.py
+cd CLI/ && python3 -m aira scan target.py
 
 # Scan a directory
-aira scan my_project/
+python3 -m aira scan target_dir/
 
-# Scan with specific rule set
-aira scan --rules exception_suppression,audit_gaps my_project/
+# Scan with specific engine
+python3 -m aira scan target_dir/ --engine static
+python3 -m aira scan target_dir/ --engine llm --provider ollama
+python3 -m aira scan target_dir/ --engine hybrid
 
-# Output JSON for processing
-aira scan --format json my_project/ > findings.json
+# Exclude patterns
+python3 -m aira scan target_dir/ --exclude "tests/,vendor/"
 
-# Verbose mode (show reasoning)
-aira scan -v my_project/
+# Output JSON
+python3 -m aira scan target_dir/ --output json
+
+# Check provider health
+python3 -m aira health
+python3 -m aira health --check-research
 ```
 
 ### Running Tests
 ```bash
-# All tests
-pytest tests/ -v
+cd CLI/
 
-# Specific rule
-pytest tests/test_rules.py::TestExceptionSuppression -v
+# All tests
+python3 -m pytest tests/ -v
 
 # Coverage
-pytest --cov=aira tests/
+python3 -m pytest --cov=aira tests/
+
+# Specific test file
+python3 -m pytest tests/test_scanner_modes.py -v
 ```
 
-### Adding a New Rule
+### Adding a New Check
 
-1. **Create rule file** in `aira/rules/my_pattern.py`:
+1. **Add check metadata** in `CLI/aira/scanner.py` — `CHECKS` dict + `CHECK_ID_BY_KEY` + `CHECK_NAME_BY_KEY`
+
+2. **Implement detection** in `CLI/aira/checkers/python_checker.py`:
 ```python
-from aira.rule_base import Rule, Finding
-
-class MyPatternRule(Rule):
-    """Detect my specific fail-soft pattern."""
-
-    category = "my_category"
-    severity = "high"  # high, medium, low
-    description = "Description of what this detects"
-
-    def check(self, node, context):
-        """AST visitor method — return list of Finding objects."""
-        findings = []
-        # Traverse AST, detect pattern
-        if self.matches_pattern(node):
-            findings.append(Finding(
-                node=node,
-                message="What went wrong",
-                remediation="How to fix it",
-                confidence=0.95,  # 0-1 scale
-            ))
-        return findings
+def _check_my_pattern(self):
+    for node in ast.walk(self.tree):
+        if matches_pattern(node):
+            self._add("C16", "MY PATTERN NAME", "HIGH", node.lineno, "What went wrong")
 ```
 
-2. **Add tests** in `tests/test_rules.py`:
-```python
-def test_my_pattern_detected():
-    code = """
-    try:
-        operation()
-    except:
-        pass  # ✗ Should be detected
-    """
-    findings = scan_code(code, rules=[MyPatternRule])
-    assert len(findings) == 1
-```
+3. **Add tests** in `CLI/tests/` with appropriate fixtures.
 
-3. **Document** in `docs/PATTERNS.md` with examples
+## Key Files
 
-4. **Register** in `aira/rules/__init__.py`
-
-## Key Files to Know
-
-| File | Purpose | Notes |
-|------|---------|-------|
-| `aira/rules/` | Pattern detection implementations | Each rule = one fail-soft category |
-| `aira/scanner.py` | Main orchestration + AST traversal | Coordinates rule execution |
-| `aira/ast_utils.py` | AST helper functions | `find_in_handler()`, `find_return_in_branch()`, etc |
-| `aira/reporter.py` | Formatting findings for output | Text, JSON, HTML formats |
-| `tests/fixtures/` | Code samples for testing | Good for rule development |
-| `docs/PATTERNS.md` | Detailed pattern definitions | Reference for developers |
-| `AIRTABLE_SCHEMA.md` | Findings database structure | Tracks scan results across projects |
+| File | Purpose |
+|------|---------|
+| `CLI/aira/scanner.py` | Core scanner, `AIRAScanner`, `ScanResult`, check registry |
+| `CLI/aira/checkers/python_checker.py` | Python static checks (C01–C15), `PythonChecker`, `Finding` |
+| `CLI/aira/checkers/js_checker.py` | JavaScript/TypeScript checks |
+| `CLI/aira/cli.py` | CLI argument parsing, output formatting, exit codes |
+| `CLI/aira/research.py` | Research backend submission (Supabase, Airtable, JSONL) |
+| `CLI/aira/llm.py` | LLM provider routing (OpenAI, Ollama, Groq, Gemini, OpenRouter) |
+| `CLI/aira/deterministic_scan.py` | Server-side inline `scan_inline_sources()` |
+| `CLI/aira/collector.py` | Public repo collection against manifests |
+| `CLI/aira/checkers/test_coverage_checker.py` | C14 test coverage analysis |
 
 ## Configuration
 
-### Rule Configuration
-```yaml
-# .aira/config.yaml
-rules:
-  - name: exception_suppression
-    severity: high
-    enabled: true
-  - name: audit_gaps
-    severity: critical
-    enabled: true
-  - name: environment_drift
-    severity: medium
-    enabled: false  # Optional rule
-```
+### Environment Variables
 
-### Exclusions
-```yaml
-exclude:
-  - "*/vendor/*"
-  - "*/.venv/*"
-  - "*/tests/*"  # Don't scan test code
-```
+| Variable | Purpose |
+|----------|---------|
+| `SUPABASE_URL` | Supabase research backend URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key |
+| `SUPABASE_TABLE` | Supabase submissions table (default: `aira_submissions`) |
+| `AIRTABLE_BASE_ID` | Airtable base ID (legacy) |
+| `AIRTABLE_TOKEN` | Airtable token (legacy) |
+| `AIRA_RESEARCH_JSONL` | JSONL research sink path |
+| `AIRA_RESEARCH_BACKEND` | Force backend: `supabase`, `jsonl`, `airtable` |
+| Aira LLM providers | `AIRA_OPENAI_BASE_URL`, `AIRA_OLLAMA_MODEL`, `AIRA_GROQ_API_KEY`, etc. |
+
+### pyproject.toml
+Project metadata and dependencies are in `pyproject.toml` at repo root.
 
 ## Common Tasks
 
 ### Scanning a Codebase
 ```bash
-# Scan with all rules
-aira scan my_repo/
-
-# High/critical severity only
-aira scan --min-severity high my_repo/
-
-# Specific categories
-aira scan --rules success_integrity,audit_gaps my_repo/
-
-# Output to file
-aira scan my_repo/ > findings.txt
+cd CLI/
+python3 -m aira scan /path/to/codebase/ --engine static
+python3 -m aira scan /path/to/codebase/ --exclude "vendor/,dist/"
 ```
 
-### Generating Reports
+### Exclusions
 ```bash
-# JSON output
-aira scan --format json my_repo/ | jq '.findings[] | select(.severity=="critical")'
+# Built-in skip dirs (always excluded):
+# .git, node_modules, __pycache__, .venv, venv, env, dist, build, .tox, coverage, .mypy_cache
 
-# HTML report
-aira scan --format html --output report.html my_repo/
-
-# CSV for spreadsheet analysis
-aira scan --format csv my_repo/ > findings.csv
+# User exclude patterns (comma-separated):
+python3 -m aira scan target/ --exclude "tests/,migrations/,legacy/"
 ```
 
 ### Interpreting Results
 
 Each finding includes:
-- **Pattern**: Category of fail-soft behavior
-- **Severity**: Critical / High / Medium / Low
-- **Confidence**: 0-1 scale (1.0 = certain, 0.7 = probable)
-- **Location**: File + line number
-- **Message**: What the pattern is
-- **Remediation**: How to fix it
+- **check_id**: C01–C15 (or `SCANNER` for scanner errors)
+- **check_name**: Human-readable category
+- **severity**: HIGH, MEDIUM, or LOW
+- **file**: Relative file path
+- **line**: Line number
+- **description**: What the pattern is
+- **snippet**: Relevant source line
 
-**Example**:
-```
-File: services/auth-service/app/routes/auth.py:243
-Pattern: Success Integrity Violation
-Severity: High
-Confidence: 0.95
-
-Message: Function returns TokenResponse on duplicate email, even when password is wrong.
-Remediation: Either reject the request with 409 Conflict, or don't return a valid JWT.
+### Submitting Research Data
+```bash
+python3 -m aira scan target/ --submit-research-aggregate --sample-name my-project
 ```
 
-## Research & Publication
+### Use as Library
+```python
+from aira.scanner import AIRAScanner
 
-- **arXiv**: https://arxiv.org/abs/2604.17587 (published research paper)
-- **Methodology**: `docs/RESEARCH.md` — how patterns were identified
-- **Findings Database**: `AIRTABLE_SCHEMA.md` — structure for tracking scan results
+scanner = AIRAScanner("my_project/")
+result = scanner.scan(mode="static")
 
-## Integration with Other Tools
+for finding in result.findings:
+    if finding["severity"] == "HIGH":
+        print(f"HIGH: {finding['file']}:{finding['line']} — {finding['description']}")
+```
 
 ### Use in CI/CD
 ```yaml
@@ -437,62 +306,30 @@ jobs:
   aira:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - run: pip install aira-scanner
-      - run: aira scan . --format json --output findings.json
-      - run: |
-          CRITICAL=$(jq '.findings[] | select(.severity=="critical") | length' findings.json)
-          if [ $CRITICAL -gt 0 ]; then exit 1; fi
+      - uses: actions/checkout@v4
+      - run: pip install -e CLI/
+      - run: cd CLI && python3 -m aira scan .. --fail-on high
 ```
 
-### Use in Code Review
-```bash
-# Scan changes in PR
-aira scan --files-only <(git diff --name-only origin/main) .
-```
+## Research & Publication
 
-### Use as Library
-```python
-from aira.scanner import AIRAScanner
-from aira.rules import AllRules
-
-scanner = AIRAScanner(rules=AllRules)
-findings = scanner.scan_directory("my_project/")
-
-for finding in findings:
-    if finding.severity == "critical":
-        print(f"CRITICAL: {finding.message}")
-```
-
-## Patterns Found in Recent Audits
-
-### TrueTraining (2026-06-09)
-- ✗ Success Integrity: Register returns valid JWT on failed auth
-- ✗ Audit Gaps: Governance audit events never persisted (loop/insert indentation)
-- ✗ Exception Suppression: Governance service import silently binds None
-- ✗ Success Integrity: Event publishing fails silently, route returns 201
-- ✗ Startup Integrity: AI providers don't validate API keys at init
-- ✗ File Upload: Reads entire file into memory (potential OOM)
-
-### V8 (Constitutional AI Governance)
-- ✓ Well-tested exception handling
-- ✓ Audit trail properly persisted
-- ✓ Critic independence maintained
-- ✗ (See ELEANOR V8 code review for findings)
+- **arXiv**: https://arxiv.org/abs/2604.17587 (published research paper)
+- **Findings Database**: Submissions go to Supabase (preferred), JSONL files, or Airtable (legacy)
 
 ## Conventions
 
-- **Rule naming**: `snake_case` for module names, `PascalCase` for classes
-- **AST patterns**: Use `ast.NodeVisitor` for traversal
-- **Severity levels**: Critical (blocks production), High (fix before merge), Medium (tech debt), Low (nice to have)
-- **Confidence**: 0.9+ for pattern matching with clear AST signatures, 0.7+ for heuristics
+- **Check IDs**: C01–C15 for checks, SCANNER for scanner errors
+- **Severity levels**: HIGH (fix before merge), MEDIUM (tech debt), LOW (nice to have)
+- **C07 and C12**: Always UNKNOWN from automated checks — require human review
+- **Static checks**: Python uses `ast` module; JS/TS use structured checks
+- **Exit codes**: 0 = pass, 1 = findings threshold exceeded, 2 = input/usage error, 3 = operational failure
 
 ## Contributing
 
-1. **Identify a pattern** (see `docs/PATTERNS.md`)
-2. **Implement rule** in `aira/rules/`
-3. **Add tests** with code fixtures
-4. **Document remediation** (how to fix)
+1. **Identify a pattern** from real-world audits
+2. **Add check metadata** in `CLI/aira/scanner.py` (CHECKS dict)
+3. **Implement detection** in `CLI/aira/checkers/python_checker.py` (and js_checker.py for JS)
+4. **Add tests** in `CLI/tests/`
 5. **Update ROADMAP.md**
 6. **Submit PR** with research findings if applicable
 
@@ -500,10 +337,10 @@ See `CONTRIBUTING.md` for detailed guidelines.
 
 ## Getting Help
 
-- Pattern definitions → `docs/PATTERNS.md`
-- Rule development → `docs/RULE_DEVELOPMENT.md`
-- Scanner usage → `docs/USAGE.md`
-- Research methodology → `docs/RESEARCH.md`
+- Check IDs and categories → `CLI/aira/scanner.py` (`CHECKS` dict)
+- Pattern details → Items 1–15 in this document
+- CLI usage → `python3 -m aira scan --help`
+- Web API → `api/` directory
 
 ---
 

@@ -1,0 +1,4 @@
+# file: /Volumes/BagelTech/GitHub/aira-scanner/CLI/aira/research/airtable.py
+# hypothesis_version: 6.141.1
+
+[422, 'AIRTABLE_BASE_ID', 'AIRTABLE_TABLE', 'AIRTABLE_TOKEN', 'Authorization', 'Content-Type', 'GET', 'POST', 'Submissions', 'application/json', 'base_id_configured', 'configured', 'field', 'fields', 'maxRecords', 'message', 'ok', 'reachable', 'replace', 'status_code', 'submitted_fields', 'table', 'token_configured', 'utf-8', '{}']

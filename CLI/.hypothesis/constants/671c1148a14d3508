@@ -1,0 +1,4 @@
+# file: /Volumes/BagelTech/GitHub/aira-scanner/CLI/aira/research/__init__.py
+# hypothesis_version: 6.141.1
+
+['BASELINE_FIELD_ORDER', 'CHECK_IDS', 'FTI_V1_TOTAL_WEIGHT', 'OPTIONAL_FIELD_ORDER', 'UNKNOWN_FIELD_RE', 'VALID_CHECK_STATUSES', 'VALID_SOURCE_KINDS', '_canonicalize', '_env', '_sha256_hex', '_supabase_target', 'airtable', 'backend', 'backend_order', 'compute_fti_v1', 'configured', 'invalid_backend', 'jsonl', 'legacy_fallback', 'message', 'none', 'ok', 'preferred_backend', 'reachable', 'risk_level_for_fti', 'supabase']

@@ -338,13 +338,84 @@ class PythonChecker:
             window_start = max(0, i - 5)
             window_end = min(len(self.lines), i + 10)
             window = "\n".join(self.lines[window_start:window_end])
-            has_write = any(re.search(p, window, re.IGNORECASE) for p in write_patterns)
-            has_idempotency = any(re.search(p, window, re.IGNORECASE) for p in idempotency_patterns)
+            # Strip string literals and comments before scanning the window
+            clean_window = self._strip_comments_and_strings(window)
+            has_write = any(re.search(p, clean_window, re.IGNORECASE) for p in write_patterns)
+            has_idempotency = any(re.search(p, clean_window, re.IGNORECASE) for p in idempotency_patterns)
             if has_write and not has_idempotency:
                 self._add("C15", "RETRY / IDEMPOTENCY ASSUMPTION DRIFT", "HIGH",
                           i,
                           f"Retry logic near write operation without idempotency key — "
                           f"double-write/commit risk: '{line.strip()}'")
+
+    @staticmethod
+    def _strip_comments_and_strings(source: str) -> str:
+        """Remove comments and string literals so idempotency regexes don't miscount."""
+        result: list[str] = []
+        i = 0
+        n = len(source)
+        while i < n:
+            c = source[i]
+            if c == '#':
+                i += 1
+                while i < n and source[i] != '\n':
+                    i += 1
+                continue
+            if c in ('"', "'"):
+                # Check for triple quotes
+                if source[i:i+3] in ('"""', "'''"):
+                    quote = source[i:i+3]
+                    i += 3
+                    while i < n and source[i:i+3] != quote:
+                        i += 1
+                    i += 3
+                    result.append(' ')
+                    continue
+                # Regular string
+                quote = c
+                i += 1
+                while i < n and source[i] != quote:
+                    if source[i] == '\\':
+                        i += 1
+                    i += 1
+                i += 1  # skip closing quote
+                result.append(' ')
+                continue
+            if c == 'f' and i + 1 < n and source[i+1] in ('"', "'"):
+                # f-string
+                i += 1
+                c = source[i]
+                if source[i:i+3] in ('"""', "'''"):
+                    quote = source[i:i+3]
+                    i += 3
+                    brace_depth = 0
+                    while i < n:
+                        if brace_depth == 0 and source[i:i+3] == quote:
+                            i += 3
+                            break
+                        if source[i] == '{':
+                            brace_depth += 1
+                        elif source[i] == '}':
+                            brace_depth -= 1
+                        i += 1
+                else:
+                    quote = c
+                    i += 1
+                    brace_depth = 0
+                    while i < n:
+                        if brace_depth == 0 and source[i] == quote:
+                            i += 1
+                            break
+                        if source[i] == '{':
+                            brace_depth += 1
+                        elif source[i] == '}':
+                            brace_depth -= 1
+                        i += 1
+                result.append(' ')
+                continue
+            result.append(c)
+            i += 1
+        return ''.join(result)
 
     # ── CHECK 4: Fallback Scatter ─────────────────────────────────
     def _check_fallback_scatter(self):

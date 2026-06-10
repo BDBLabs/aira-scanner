@@ -1,3 +1,5 @@
+"""Tests for public repository collection functionality."""
+
 import io
 import json
 import tempfile

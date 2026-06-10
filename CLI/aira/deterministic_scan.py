@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Mapping, Sequence
 
-from aira.scanner import AIRAScanner, SUPPORTED_EXTENSIONS
+from aira.scanner import AIRAScanner, ScanResult, SUPPORTED_EXTENSIONS
 
 try:
     import esprima  # type: ignore
@@ -80,7 +80,7 @@ def _metadata_for_languages(languages: Sequence[str]) -> Dict[str, Any]:
     }
 
 
-def _build_summary(result) -> Dict[str, Any]:
+def _build_summary(result: ScanResult) -> Dict[str, Any]:
     by_severity = result.summary.get("by_severity") or {}
     return {
         "high": int(by_severity.get("HIGH", 0)),

@@ -17,6 +17,7 @@ try:
     from aira.research import ResearchSubmissionError, check_research_connection, submit_aggregate_research
     from aira.scanner import (
         AIRAScanner,
+        ScanResult,
         ScanTargetError,
         ScannerExecutionError,
         ScannerInputError,
@@ -33,6 +34,7 @@ except ImportError:
     from aira.research import ResearchSubmissionError, check_research_connection, submit_aggregate_research
     from aira.scanner import (
         AIRAScanner,
+        ScanResult,
         ScanTargetError,
         ScannerExecutionError,
         ScannerInputError,
@@ -87,7 +89,7 @@ def build_llm_config(args: argparse.Namespace) -> LLMConfig:
     )
 
 
-def print_summary(result) -> None:
+def print_summary(result: ScanResult) -> None:
     summary = result.summary
     metadata = result.metadata or {}
     print(f"\n{C.BOLD}{'═'*55}{C.RESET}")
@@ -124,7 +126,7 @@ def print_summary(result) -> None:
     print(f"{'═'*55}\n")
 
 
-def print_check_results(result) -> None:
+def print_check_results(result: ScanResult) -> None:
     print(f"{C.BOLD}  CHECK RESULTS{C.RESET}")
     print(f"{'─'*55}")
     for key, status in result.check_results.items():
@@ -134,7 +136,7 @@ def print_check_results(result) -> None:
     print()
 
 
-def print_findings(result) -> None:
+def print_findings(result: ScanResult) -> None:
     findings = result.findings
     if not findings:
         print(f"  {C.GREEN}✓ No findings. All automated checks passed.{C.RESET}\n")
@@ -314,7 +316,7 @@ def positive_int(flag_label: str):
     return converter
 
 
-def has_scanner_errors(result) -> bool:
+def has_scanner_errors(result: ScanResult) -> bool:
     return any(finding.get("check_id") == "SCANNER" for finding in result.findings)
 
 
@@ -339,7 +341,7 @@ def write_text_output(out_file: str, content: str) -> None:
         raise ScanTargetError(f"Could not write output file {path}: {exc}") from exc
 
 
-def exit_code_for_result(result, fail_on: str) -> int:
+def exit_code_for_result(result: ScanResult, fail_on: str) -> int:
     if has_scanner_errors(result):
         return EXIT_INPUT_OR_USAGE
     threshold = FAIL_THRESHOLD[fail_on]
