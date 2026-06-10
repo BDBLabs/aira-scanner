@@ -234,13 +234,14 @@ def print_providers() -> None:
     print("    Env: AIRA_OLLAMA_MODEL / OLLAMA_MODEL, optional AIRA_OLLAMA_HOST / OLLAMA_HOST")
     print("    Use 'aira health --json' to see available models exposed by the running Ollama service.")
     print()
+    print("  nvidia")
+    print("    Fast cloud structured-output path via NVIDIA NIM.")
+    print("    Default model: stepfun-ai/step-3.7-flash")
+    print("    Env: AIRA_NVIDIA_API_KEY / NVIDIA_API_KEY, optional AIRA_NVIDIA_MODEL / NVIDIA_MODEL")
+    print()
     print("  groq")
     print("    Fast cloud structured-output path.")
     print("    Env: AIRA_GROQ_API_KEY / GROQ_API_KEY, AIRA_GROQ_MODEL / GROQ_MODEL")
-    print()
-    print("  gemini")
-    print("    Optional cloud fallback.")
-    print("    Env: AIRA_GEMINI_API_KEY / GEMINI_API_KEY / GOOGLE_API_KEY, optional AIRA_GEMINI_MODEL / GEMINI_MODEL")
     print()
     print("  openrouter")
     print("    Optional rotating cloud fallback.")
@@ -249,8 +250,8 @@ def print_providers() -> None:
     print("  Recommended CLI flow:")
     print("    1. local OpenAI-compatible endpoint, if you already have one")
     print("    2. Ollama")
-    print("    3. Groq")
-    print("    4. Gemini")
+    print("    3. NVIDIA NIM")
+    print("    4. Groq")
     print("    5. OpenRouter")
     print()
 
@@ -356,7 +357,7 @@ def add_llm_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--engine", choices=["static", "llm", "hybrid"], default="static", help="Scan engine mode")
     parser.add_argument(
         "--provider",
-        choices=["auto", "openai-compatible", "ollama", "groq", "gemini", "openrouter"],
+        choices=["auto", "openai-compatible", "ollama", "nvidia", "groq", "openrouter"],
         default="auto",
         help="LLM provider to use when engine is llm or hybrid",
     )

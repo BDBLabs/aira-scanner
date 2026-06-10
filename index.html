@@ -392,17 +392,12 @@ def save_record(db, record):
       <span class="lang-label">Engine</span>
       <select id="engine-select">
         <option value="auto">Auto (Recommended: Groq)</option>
-        <option value="gemini">Gemini only</option>
         <option value="heuristic">Deterministic static scan</option>
       </select>
       <button class="scan-btn" id="scan-btn" onclick="runScan()">
         <div class="spinner"></div>
         <span class="btn-text">Run AIRA Scan</span>
       </button>
-    </div>
-    <div class="engine-note">
-      Recommended zero-cost setup: configure <code>GROQ_API_KEY</code> and leave the scanner in Auto mode.
-      It routes through Groq first, then any configured cloud fallbacks, then the deterministic parser-backed/static scan, and finally the browser-only heuristic scan if the server-side static scan is unavailable.
     </div>
 
     <!-- Loading -->
@@ -527,6 +522,8 @@ let uploadedFileName = '';
 let lastResult      = null;
 let githubFiles     = [];   // [{path, url, selected}]
 let githubFetched   = {};   // path → content cache
+let githubRepoName  = '';
+let githubBranchName = '';
 
 // ── TABS ────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(tab => {
@@ -538,6 +535,13 @@ document.querySelectorAll('.tab').forEach(tab => {
       document.getElementById('tab-' + id).classList.toggle('hidden', id !== which);
     });
   });
+});
+
+// Re-render GitHub file list when language filter changes
+document.getElementById('lang-select').addEventListener('change', () => {
+  if (githubFiles.length > 0) {
+    renderGithubFileList();
+  }
 });
 
 // ── FILE UPLOAD ─────────────────────────────────────────────────
@@ -563,7 +567,8 @@ function handleFile(file) {
     document.getElementById('error-panel').classList.remove('show');
     const ext = file.name.split('.').pop().toLowerCase();
     const langMap = { py:'python', js:'javascript', ts:'typescript', jsx:'javascript', tsx:'typescript', mjs:'javascript', cjs:'javascript' };
-    if (langMap[ext]) document.getElementById('lang-select').value = langMap[ext];
+    if (langMap[ext]) {} // Autodetect by default, no auto-override
+  };
   };
   reader.onerror = () => {
     showError(`Could not read ${file.name}. Please try again.`);
@@ -630,8 +635,10 @@ async function fetchGithubFiles() {
       url: `https://raw.githubusercontent.com/${repo}/${branch}/${f.path}`,
       size: f.size
     }));
+    githubRepoName = repo;
+    githubBranchName = branch;
 
-    renderGithubFileList(repo, branch);
+    renderGithubFileList();
     setGithubStatus(`Found ${scannable.length} scannable file${scannable.length !== 1 ? 's' : ''} in ${repo}`, 'ok');
 
   } catch(err) {
@@ -642,24 +649,37 @@ async function fetchGithubFiles() {
   }
 }
 
-function renderGithubFileList(repo, branch) {
+function renderGithubFileList() {
   const listEl = document.getElementById('github-file-list');
   const hintEl = document.getElementById('github-select-hint');
+  const langFilter = document.getElementById('lang-select').value;
+
+  const extMap = {
+    python: ['.py'],
+    javascript: ['.js', '.jsx', '.mjs', '.cjs'],
+    typescript: ['.ts', '.tsx']
+  };
+
+  const matched = githubFiles
+    .map((f, origIdx) => ({ file: f, origIdx }))
+    .filter(({ file }) => langFilter === 'auto' || (extMap[langFilter] || []).some(ext => file.path.endsWith(ext)));
 
   listEl.innerHTML = '';
-  githubFiles.forEach((f, i) => {
+  matched.forEach(({ file, origIdx }) => {
     const item = document.createElement('label');
     item.className = 'github-file-item';
     item.innerHTML = `
-      <input type="checkbox" data-idx="${i}" onchange="updateGithubSelection()" checked>
-      <span>${f.path}</span>
-      <span style="margin-left:auto;color:var(--text-muted);font-size:0.65rem">${(f.size/1024).toFixed(1)}KB</span>
+      <input type="checkbox" data-idx="${origIdx}" onchange="updateGithubSelection()" checked>
+      <span>${file.path}</span>
+      <span style="margin-left:auto;color:var(--text-muted);font-size:0.65rem">${(file.size/1024).toFixed(1)}KB</span>
     `;
     listEl.appendChild(item);
   });
 
   listEl.classList.remove('hidden');
-  hintEl.textContent = `Select files to include in scan. All ${githubFiles.length} selected.`;
+  hintEl.textContent = langFilter === 'auto'
+    ? `Select files to include in scan. All ${matched.length} selected.`
+    : `Select files to include in scan. All ${matched.length} ${langFilter} files selected.`;
   hintEl.classList.remove('hidden');
 }
 
@@ -695,11 +715,10 @@ async function getGithubCode() {
   const files = await Promise.all(fetches);
   const combined = files.map(f => `// ── FILE: ${f.path} ──\n${f.code}`).join('\n\n');
 
-  // Detect dominant language
+  // Detect dominant language for scan — keep selector at user's choice
   const pyCount = selected.filter(f => f.path.endsWith('.py')).length;
   const jsCount = selected.filter(f => /\.(?:js|jsx|ts|tsx|mjs|cjs)$/.test(f.path)).length;
   const lang = pyCount >= jsCount ? 'python' : 'javascript';
-  document.getElementById('lang-select').value = lang;
 
   return { code: combined, lang, files };
 }
@@ -876,7 +895,7 @@ ${code.slice(0, 30000)}`;
 function providerLabel(provider) {
   if (provider === 'groq') return 'Groq structured scan';
   if (provider === 'openrouter') return 'OpenRouter structured scan';
-  if (provider === 'gemini') return 'Gemini structured scan';
+  if (provider === 'nvidia') return 'NVIDIA structured scan';
   return 'Cloud structured scan';
 }
 
@@ -965,13 +984,8 @@ async function callAIRAScanner(input) {
   }
 
   try {
-    const provider = engine === 'gemini' ? 'gemini' : 'auto';
-    return await callCloudScanner(input, provider);
+    return await callCloudScanner(input, 'auto');
   } catch (err) {
-    if (engine === 'gemini') {
-      throw err;
-    }
-
     return callDeterministicOrBrowserFallback(
       input.code,
       input.lang,
