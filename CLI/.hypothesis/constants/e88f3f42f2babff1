@@ -1,4 +1,0 @@
-# file: /Volumes/BagelTech/GitHub/aira-scanner/CLI/aira/deterministic_scan.py
-# hypothesis_version: 6.141.1
-
-['.', '..', '.cjs', '.js', '.jsx', '.mjs', '.py', '.ts', '.tsx', '/', 'HIGH', 'LOW', 'MEDIUM', '\\', 'aira-static-', 'by_severity', 'check_id', 'check_name', 'checks', 'checks_failed', 'checks_passed', 'checks_unknown', 'cjs', 'code', 'description', 'deterministic-static', 'engine', 'engine_label', 'file', 'files_scanned', 'findings', 'findings_total', 'high', 'javascript', 'js', 'jsx', 'language', 'languages', 'line', 'low', 'medium', 'meta', 'mixed', 'mjs', 'note', 'parser_backed', 'path', 'py', 'python', 'severity', 'snippet', 'source_count', 'static', 'summary', 'total', 'ts', 'tsx', 'typescript', 'utf-8']

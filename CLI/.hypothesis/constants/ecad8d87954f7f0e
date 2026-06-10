@@ -1,4 +1,0 @@
-# file: /Volumes/BagelTech/GitHub/aira-scanner/CLI/aira/research/supabase.py
-# hypothesis_version: 6.141.1
-
-['*', '/', 'Authorization', 'Content-Type', 'GET', 'POST', 'Prefer', 'SUPABASE_KEY', 'SUPABASE_TABLE', 'SUPABASE_URL', '[]', 'aira_submissions', 'apikey', 'application/json', 'backend', 'check_id', 'check_name', 'checks_table', 'configured', 'duplicate', 'error', 'error_description', 'finding_count', 'high_count', 'id', 'id,record_sha256', 'key_configured', 'limit', 'low_count', 'medium_count', 'message', 'ok', 'on_conflict', 'order', 'reachable', 'record', 'record_sha256', 'replace', 'sample_name', 'sample_version', 'select', 'status', 'status_code', 'submission_checks', 'submission_id', 'submitted_at', 'supabase', 'table', 'url_configured', 'utf-8', 'weight', '{}']
