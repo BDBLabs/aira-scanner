@@ -569,7 +569,6 @@ function handleFile(file) {
     const langMap = { py:'python', js:'javascript', ts:'typescript', jsx:'javascript', tsx:'typescript', mjs:'javascript', cjs:'javascript' };
     if (langMap[ext]) {} // Autodetect by default, no auto-override
   };
-  };
   reader.onerror = () => {
     showError(`Could not read ${file.name}. Please try again.`);
     uploadedCode = '';
@@ -685,9 +684,9 @@ function renderGithubFileList() {
 
 function updateGithubSelection() {
   const checked = document.querySelectorAll('#github-file-list input[type=checkbox]:checked').length;
-  const total = githubFiles.length;
+  const visible = document.querySelectorAll('#github-file-list input[type=checkbox]').length;
   const hint = document.getElementById('github-select-hint');
-  hint.textContent = `${checked} of ${total} files selected.`;
+  hint.textContent = `${checked} of ${visible} files selected.`;
 }
 
 function setGithubStatus(msg, type) {
