@@ -1,0 +1,4 @@
+# file: /Volumes/BagelTech/GitHub/aira-scanner/CLI/aira/collector.py
+# hypothesis_version: 6.141.1
+
+['--depth', '.git', '.json', '/', '1', 'AIRA_RULESET_VERSION', 'AIRA_SCANNER_VERSION', 'FETCH_HEAD', 'HEAD', 'POST', '__', 'aira-collect-', 'attribution_class', 'attribution_policy', 'backend', 'checkout', 'checks_failed', 'clone', 'commit_sha', 'defaults', 'duplicate', 'error', 'errors', 'exclusion_criteria', 'fetch', 'git', 'git@', 'git@github.com:', 'http', 'http://', 'http://github.com/', 'https://', 'https://github.com/', 'id', 'inclusion_criteria', 'manifest_sha256', 'notes', 'ok', 'origin', 'random_seed', 'ref', 'repo', 'rev-parse', 'ruleset_version', 'sample_name', 'sample_version', 'samples', 'sampling_frame', 'sampling_method', 'scanner_version', 'scoring_version', 'source_id', 'source_kind', 'static', 'submitted', 'supabase', 'unknown', 'unresolved', 'unresolved-sample', 'utf-8']
