@@ -4,7 +4,29 @@ All notable changes to AIRA Scanner will be documented here.
 
 ## [Unreleased]
 
+## [v1.3.0] - 2026-07-04
+
+Parity release: the CLI, the web API, and the published Homebrew build now run the same deterministic rules and the same provider/model selection. v1.2.1 installs had drifted from the deployed web scanner while both still reported version 1.2.1.
+
+### Detection changes (deterministic engine)
+
+- Fixed the C11 determinism regex so fractional temperatures such as `temperature=0.9` are detected; v1.2.1 only matched values with a non-zero integer part
+- Reworked C05 bypass detection from line-level regex matching to AST-based identifier analysis, removing false positives on plain flag assignments
+- Hardened scanner error handling: scanner failures now surface as explicit `SCANNER` findings and dedicated exit codes instead of silently passing
+
+### Provider routing and model selection
+
+- Replaced the Gemini provider with NVIDIA NIM (default model `stepfun-ai/step-3.7-flash`) in both the CLI and the web routing layer
+- Web routing now honors an explicit per-request model for NVIDIA, Groq, and OpenRouter (previously only Ollama respected it; other providers silently fell back to the configured default)
+- CLI Groq routing now matches the web: `llama-3.1-8b-instant` is the default model and an API key alone is enough to configure the provider
+- Auto provider order is now identical in CLI and web (`ollama → nvidia → groq → openrouter`, with the CLI additionally preferring a local OpenAI-compatible endpoint first)
+
+### Packaging and docs
+
+- Moved the scanner package into `CLI/` and refreshed the docs
 - Published a dedicated `homebrew-aira-scanner` tap so Homebrew can auto-tap on `brew install BDB-Labs/aira-scanner/aira`
+- Removed inaccurate PyPI install instructions; AIRA is distributed via Homebrew and source installs only
+- Removed the stale Gemini free-tier comment from the web scan route
 
 ## [v1.2.1] - 2026-04-21
 

@@ -6,22 +6,6 @@ export const config = {
 
 import { runLLM } from '../lib/llm.js';
 
-/*
-Legacy Anthropic proxy reference, intentionally kept commented out while AIRA
-uses Gemini on the free tier:
-
-const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
-const anthropicResponse = await fetch('https://api.anthropic.com/v1/messages', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'x-api-key': anthropicApiKey,
-    'anthropic-version': '2023-06-01'
-  },
-  body: JSON.stringify(req.body)
-});
-*/
-
 function buildPrompt(body) {
   if (typeof body?.prompt === 'string' && body.prompt.trim()) {
     return body.prompt.trim();
