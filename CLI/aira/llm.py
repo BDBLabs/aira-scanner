@@ -61,7 +61,7 @@ def _provider_model(provider: str, config: Optional[LLMConfig] = None) -> Option
     if provider == "nvidia":
         return _env("AIRA_NVIDIA_MODEL", "NVIDIA_MODEL") or "stepfun-ai/step-3.7-flash"
     if provider == "groq":
-        return _env("AIRA_GROQ_MODEL", "GROQ_MODEL")
+        return _env("AIRA_GROQ_MODEL", "GROQ_MODEL") or "llama-3.1-8b-instant"
     if provider == "openrouter":
         return _env("AIRA_OPENROUTER_MODEL", "OPENROUTER_MODEL")
     return None

@@ -20,10 +20,6 @@ AIRA implements 15 checks derived from empirical observation of these patterns a
 
 ## Installation
 
-```bash
-pip install aira-scanner
-```
-
 ### Homebrew
 
 ```bash
@@ -41,6 +37,13 @@ For the latest unreleased code:
 
 ```bash
 brew install --HEAD BDB-Labs/aira-scanner/aira
+```
+
+### From source
+
+```bash
+git clone https://github.com/BDB-Labs/aira-scanner.git
+pip install ./aira-scanner/CLI
 ```
 
 **Requirements:** Python 3.9+, PyYAML
@@ -145,8 +148,8 @@ Provider routing is local-first:
 
 1. OpenAI-compatible local endpoint
 2. Ollama
-3. Groq
-4. Gemini
+3. NVIDIA NIM
+4. Groq
 5. OpenRouter
 
 The web app also now uses a deterministic server-side static scan before falling back to browser-only heuristics. That static scan is parser-backed for Python and, when `esprima` is installed, parser-backed for JavaScript as well.
@@ -165,9 +168,13 @@ export AIRA_OLLAMA_HOST="http://127.0.0.1:11434"
 # Discover available Ollama models and validate the selected one
 aira health --json
 
-# Groq
+# NVIDIA NIM (default model: stepfun-ai/step-3.7-flash)
+export NVIDIA_API_KEY="..."
+export NVIDIA_MODEL="stepfun-ai/step-3.7-flash"
+
+# Groq (default model: llama-3.1-8b-instant)
 export GROQ_API_KEY="..."
-export GROQ_MODEL="your-provider-model-id"
+export GROQ_MODEL="llama-3.1-8b-instant"
 
 # Preferred hosted backend: Supabase
 export RESEARCH_BACKEND="supabase"
@@ -183,8 +190,8 @@ export AIRA_SAMPLE_VERSION="2026-03"
 export AIRA_ATTRIBUTION_CLASS="suspected_ai"
 export AIRA_SOURCE_ID="my-org/my-project"
 export AIRA_SOURCE_KIND="repo"
-export AIRA_SCANNER_VERSION="1.2.1"
-export AIRA_RULESET_VERSION="1.2.1"
+export AIRA_SCANNER_VERSION="1.3.0"
+export AIRA_RULESET_VERSION="1.3.0"
 
 # Local/CI backend: newline-delimited JSON
 export AIRA_RESEARCH_JSONL="/absolute/path/to/aira-research.jsonl"
@@ -381,7 +388,7 @@ aira_scan:
 # GitHub Actions example
 - name: Run AIRA scan
   run: |
-    pip install aira-scanner
+    pip install "git+https://github.com/BDB-Labs/aira-scanner.git#subdirectory=CLI"
     aira scan . --output json --out-file aira-report.json
   # Exit code 1 if HIGH severity findings found
 ```

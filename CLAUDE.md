@@ -16,7 +16,7 @@ AIRA identifies systems that:
 - Command-line linter + rule engine
 - Detects 15 fail-soft pattern categories (C01–C15)
 - Works on Python, JavaScript, and TypeScript codebases
-- Published as `aira-scanner` on PyPI and Homebrew
+- Published via Homebrew (`brew install BDB-Labs/aira-scanner/aira`); source installs via `pip install ./CLI`
 - Research-driven: empirical validation in progress
 
 ## Repository Structure
@@ -228,7 +228,7 @@ def _check_my_pattern(self):
 | `CLI/aira/checkers/js_checker.py` | JavaScript/TypeScript checks |
 | `CLI/aira/cli.py` | CLI argument parsing, output formatting, exit codes |
 | `CLI/aira/research.py` | Research backend submission (Supabase, Airtable, JSONL) |
-| `CLI/aira/llm.py` | LLM provider routing (OpenAI, Ollama, Groq, Gemini, OpenRouter) |
+| `CLI/aira/llm.py` | LLM provider routing (OpenAI-compatible, Ollama, NVIDIA NIM, Groq, OpenRouter) |
 | `CLI/aira/deterministic_scan.py` | Server-side inline `scan_inline_sources()` |
 | `CLI/aira/collector.py` | Public repo collection against manifests |
 | `CLI/aira/checkers/test_coverage_checker.py` | C14 test coverage analysis |
@@ -344,7 +344,7 @@ See `CONTRIBUTING.md` for detailed guidelines.
 
 ---
 
-**Last Updated**: 2026-06-09
+**Last Updated**: 2026-07-04
 **Website**: https://aira.bageltech.net
 **Paper**: https://arxiv.org/abs/2604.17587
 **Active Researchers**: Bill P + team

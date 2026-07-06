@@ -35,6 +35,32 @@ class ProviderHealthSnapshotTests(unittest.TestCase):
         self.assertIn("qwen3:32b", snapshot["providers"]["ollama"]["available_models"])
         self.assertTrue(snapshot["providers"]["ollama"]["selected_model_available"])
 
+    def test_groq_configured_with_api_key_alone_uses_default_model(self):
+        env = {"AIRA_GROQ_API_KEY": "test-key"}
+        removed = {name: "" for name in ("AIRA_GROQ_MODEL", "GROQ_MODEL")}
+        with mock.patch.dict(os.environ, {**env, **removed}, clear=False):
+            with mock.patch("aira.llm._fetch_ollama_models", return_value=[]):
+                snapshot = provider_health_snapshot(LLMConfig())
+
+        self.assertIn("groq", snapshot["configured_providers"])
+        self.assertEqual(snapshot["providers"]["groq"]["model"], "llama-3.1-8b-instant")
+
+    def test_groq_env_model_overrides_default(self):
+        env = {"AIRA_GROQ_API_KEY": "test-key", "AIRA_GROQ_MODEL": "openai/gpt-oss-120b"}
+        with mock.patch.dict(os.environ, env, clear=False):
+            with mock.patch("aira.llm._fetch_ollama_models", return_value=[]):
+                snapshot = provider_health_snapshot(LLMConfig())
+
+        self.assertEqual(snapshot["providers"]["groq"]["model"], "openai/gpt-oss-120b")
+
+    def test_explicit_config_model_overrides_groq_default(self):
+        env = {"AIRA_GROQ_API_KEY": "test-key"}
+        with mock.patch.dict(os.environ, env, clear=False):
+            with mock.patch("aira.llm._fetch_ollama_models", return_value=[]):
+                snapshot = provider_health_snapshot(LLMConfig(model="qwen/qwen3-32b"))
+
+        self.assertEqual(snapshot["providers"]["groq"]["model"], "qwen/qwen3-32b")
+
     def test_ollama_reports_missing_selected_model(self):
         with mock.patch.dict(os.environ, {"AIRA_OLLAMA_MODEL": "missing-model"}, clear=False):
             with mock.patch(

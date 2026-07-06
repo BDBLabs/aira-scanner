@@ -87,12 +87,17 @@ Empirical datasets and expanded detection rules are in progress.
 
 ## Install
 
-```bash
-pip install aira-scanner
-```
+Via Homebrew:
 
 ```bash
 brew install BDB-Labs/aira-scanner/aira
+```
+
+Or from source:
+
+```bash
+git clone https://github.com/BDB-Labs/aira-scanner.git
+pip install ./aira-scanner/CLI
 ```
 
 ## Documentation
@@ -113,13 +118,13 @@ For readers who need more than the landing-page overview:
 
 The scanner currently supports:
 
-* `Auto` mode: routes through Groq first, then configured fallbacks
+* `Auto` mode: routes through configured providers in order (Ollama → NVIDIA NIM → Groq → OpenRouter)
 * deterministic static scanning through `/api/static-scan`
 * Ollama model discovery in health surfaces, including available-model reporting and selected-model validation
 * optional cloud providers:
 
-  * `GROQ_API_KEY` with optional `GROQ_MODEL`
-  * `GEMINI_API_KEY` or `GOOGLE_API_KEY` with optional `GEMINI_MODEL`
+  * `NVIDIA_API_KEY` with optional `NVIDIA_MODEL` (default: `stepfun-ai/step-3.7-flash`)
+  * `GROQ_API_KEY` with optional `GROQ_MODEL` (default: `llama-3.1-8b-instant`)
   * `OPENROUTER_API_KEY` with `OPENROUTER_MODEL`
 * browser heuristic fallback for local deterministic triage when both cloud routing and server-side static scanning are unavailable
 * research submission through a server-side research backend

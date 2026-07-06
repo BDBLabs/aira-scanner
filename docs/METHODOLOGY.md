@@ -106,8 +106,8 @@ Provider support is deliberately flexible:
 
 - local OpenAI-compatible endpoints
 - Ollama
+- NVIDIA NIM
 - Groq
-- Gemini
 - OpenRouter
 
 The web app has its own routed provider surface and health checks. The CLI has a local-first provider order and explicit health/probe commands.
