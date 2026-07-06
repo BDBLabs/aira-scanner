@@ -16,3 +16,4 @@ node_modules/
 .tox/
 coverage/
 .hypothesis/
+.DS_Store
