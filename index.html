@@ -856,6 +856,7 @@ Return ONLY valid JSON matching this exact schema:
       "check_id": "C01",
       "check_name": "SUCCESS INTEGRITY",
       "severity": "HIGH|MEDIUM|LOW",
+      "file": "path/to/file.py",
       "line": 42,
       "description": "Clear description of the specific violation found",
       "snippet": "optional code snippet"
@@ -886,7 +887,16 @@ C13 CONFIDENCE MISREPRESENTATION: inferred or degraded output without confidence
 C14 TEST COVERAGE ASYMMETRY: failure-path tests lag happy-path tests.
 C15 IDEMPOTENCY DRIFT: retrying writes without idempotency controls.
 
-Keep C07 and C12 as UNKNOWN. Include only grounded findings. Code:
+Keep C07 and C12 as UNKNOWN. Include only grounded findings.
+
+FILE ATTRIBUTION: the code below may contain multiple files. Each file's content is preceded
+by a marker comment in the form "// ── FILE: <path> ──". For every finding:
+- Set "file" to the exact <path> from the nearest marker ABOVE that finding's code.
+- Set "line" to the line number counting from immediately after that marker (the first line
+  of that file's own content is line 1) — NOT the line's position in this combined text.
+If no marker comment is present (single-file input), omit "file" or set it to "".
+
+Code:
 
 ${code.slice(0, 30000)}`;
 }
