@@ -152,6 +152,16 @@ Each finding also includes:
 - description
 - optional snippet
 
+For reproducible studies, findings also include deterministic location metadata:
+
+- stable finding, semantic, and location fingerprints
+- a normalized boundary type, such as exception handler, fallback branch, environment gate, return contract, async task, or retry/write boundary
+- enclosing function/class context where available
+- normalized line position within the file
+- parser or heuristic provenance for the context metadata
+
+This metadata supports model-vs-static comparison without sending source code to the aggregate research backend.
+
 ## 9. Severity Semantics
 
 Severity is heuristic and should be interpreted as prioritization guidance, not mathematical truth.
@@ -232,6 +242,7 @@ The safest way to use AIRA today is:
 2. use hybrid or LLM modes as comparison and augmentation
 3. review `HIGH` findings first
 4. do not suppress the `UNKNOWN` posture on human-review checks
-5. preserve provenance about which engine produced the result
+5. preserve raw JSON outputs when comparing engines or models
+6. preserve provenance about which engine produced the result
 
 That posture keeps AIRA useful without letting the tool overclaim what it knows.

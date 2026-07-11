@@ -24,12 +24,14 @@ try:
     from aira.checkers.js_checker import JSChecker
     from aira.checkers.python_checker import PythonChecker
     from aira.checkers.test_coverage_checker import scan_test_files
+    from aira.finding_metadata import enrich_finding
     from aira.llm import LLMConfig, LLMRoutingError, run_llm_json_audit
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from aira.checkers.js_checker import JSChecker
     from aira.checkers.python_checker import PythonChecker
     from aira.checkers.test_coverage_checker import scan_test_files
+    from aira.finding_metadata import enrich_finding
     from aira.llm import LLMConfig, LLMRoutingError, run_llm_json_audit
 
 from aira import __version__
@@ -193,7 +195,7 @@ def _normalize_findings(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     severity_rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
     normalized = []
     for finding in findings:
-        normalized.append({
+        item = {
             "check_id": finding.get("check_id", "C00"),
             "check_name": finding.get("check_name", "UNSPECIFIED"),
             "severity": finding.get("severity", "LOW") if finding.get("severity") in {"HIGH", "MEDIUM", "LOW"} else "LOW",
@@ -201,7 +203,18 @@ def _normalize_findings(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "line": _coerce_line_number(finding.get("line", 0)),
             "description": str(finding.get("description", "")),
             "snippet": str(finding.get("snippet", "") or ""),
-        })
+        }
+        for optional_key in (
+            "boundary_type",
+            "context",
+            "evidence",
+            "fingerprint",
+            "semantic_fingerprint",
+            "location_fingerprint",
+        ):
+            if optional_key in finding:
+                item[optional_key] = finding[optional_key]
+        normalized.append(enrich_finding(item))
     return sorted(normalized, key=lambda item: (severity_rank.get(item["severity"], 3), item["file"], item["line"], item["check_id"]))
 
 
@@ -320,7 +333,7 @@ class AIRAScanner:
                 normalized = dict(finding)
                 if normalized.get("file"):
                     normalized["file"] = self._display_path(Path(normalized["file"]))
-                findings.append(normalized)
+                findings.append(self._enrich_display_finding(normalized))
 
         failed_checks = {finding["check_id"] for finding in findings if str(finding.get("check_id", "")).startswith("C")}
         check_results = _default_check_results(files_scanned)
@@ -346,15 +359,20 @@ class AIRAScanner:
             checker = PythonChecker(str(filepath)) if lang == "python" else JSChecker(str(filepath))
             display_path = self._display_path(filepath)
             findings = [
-                {
-                    "check_id": item.check_id,
-                    "check_name": item.check_name,
-                    "severity": item.severity,
-                    "file": display_path,
-                    "line": item.line,
-                    "description": item.description,
-                    "snippet": item.snippet or "",
-                }
+                enrich_finding(
+                    {
+                        "check_id": item.check_id,
+                        "check_name": item.check_name,
+                        "severity": item.severity,
+                        "file": display_path,
+                        "line": item.line,
+                        "description": item.description,
+                        "snippet": item.snippet or "",
+                    },
+                    source=checker.source,
+                    source_path=filepath,
+                    language=lang,
+                )
                 for item in checker.run()
             ]
             return findings, 1
@@ -364,7 +382,7 @@ class AIRAScanner:
             return [self._scanner_error_finding(filepath, f"Scanner failed on file: {exc}")], 1
 
     def _scanner_error_finding(self, filepath: Path, description: str, line: int = 0) -> Dict[str, Any]:
-        return {
+        return enrich_finding({
             "check_id": "SCANNER",
             "check_name": "SCANNER ERROR",
             "severity": "HIGH",
@@ -372,7 +390,23 @@ class AIRAScanner:
             "line": line,
             "description": f"{description}. Fix this file or exclude it before relying on scan results.",
             "snippet": "",
-        }
+        }, source_path=filepath)
+
+    def _source_path_for_display_path(self, display_path: str) -> Optional[Path]:
+        if not display_path:
+            return self.target if self.target.is_file() else None
+        candidate = Path(display_path)
+        if candidate.is_absolute():
+            return candidate if candidate.exists() else None
+        if self.target.is_file():
+            return self.target
+        resolved = self.target / candidate
+        return resolved if resolved.exists() else None
+
+    def _enrich_display_finding(self, finding: Dict[str, Any]) -> Dict[str, Any]:
+        source_path = self._source_path_for_display_path(str(finding.get("file") or ""))
+        language = SUPPORTED_EXTENSIONS.get(source_path.suffix.lower()) if source_path else None
+        return enrich_finding(finding, source_path=source_path, language=language)
 
     def _files_to_scan(self) -> List[Path]:
         if not self.target.exists():
@@ -577,6 +611,7 @@ Code snapshot:
                 "description": str(item.get("description", "")),
                 "snippet": str(item.get("snippet", "") or ""),
             })
+        findings = [self._enrich_display_finding(finding) for finding in findings]
 
         return _build_result(
             self.target,

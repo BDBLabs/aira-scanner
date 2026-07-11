@@ -147,6 +147,12 @@ def scan_inline_sources(sources: Sequence[Mapping[str, Any]], default_lang: str 
                 "line": finding["line"],
                 "description": finding["description"],
                 "snippet": finding["snippet"],
+                "boundary_type": finding.get("boundary_type", "unknown"),
+                "context": finding.get("context", {}),
+                "evidence": finding.get("evidence", {}),
+                "fingerprint": finding.get("fingerprint", ""),
+                "semantic_fingerprint": finding.get("semantic_fingerprint", ""),
+                "location_fingerprint": finding.get("location_fingerprint", ""),
             }
             for finding in result.findings
         ],

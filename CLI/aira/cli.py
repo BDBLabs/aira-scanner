@@ -12,6 +12,7 @@ from pathlib import Path
 
 try:
     from aira import __version__
+    from aira.comparison import build_suppression_matrix, load_scan
     from aira.llm import LLMConfig, LLMRoutingError, provider_health_snapshot
     from aira.collector import collect_public_repos
     from aira.research import ResearchSubmissionError, check_research_connection, submit_aggregate_research
@@ -29,6 +30,7 @@ try:
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from aira import __version__
+    from aira.comparison import build_suppression_matrix, load_scan
     from aira.llm import LLMConfig, LLMRoutingError, provider_health_snapshot
     from aira.collector import collect_public_repos
     from aira.research import ResearchSubmissionError, check_research_connection, submit_aggregate_research
@@ -282,6 +284,32 @@ def print_collection_summary(summary: dict) -> None:
     print()
 
 
+def print_comparison_summary(matrix: dict) -> None:
+    summary = matrix.get("summary", {})
+    print_banner()
+    print(f"{C.BOLD}  STATIC VS MODEL COMPARISON{C.RESET}")
+    print(f"{'─'*55}")
+    print(f"  Line window:      {summary.get('line_window', 'n/a')}")
+    print(f"  Static findings:  {summary.get('static_findings', 0)}")
+    print(f"  Model findings:   {summary.get('model_findings', 0)}")
+    print(f"  Ratio:            {summary.get('static_to_model_finding_ratio', 'n/a')}:1")
+    print(f"  Matched:          {summary.get('matched_by_model', 0)}")
+    print(f"  Missed by model:  {summary.get('missed_by_model', 0)}")
+    print(f"  Model-only:       {summary.get('model_only_findings', 0)}")
+    print()
+    print("  Check status suppression:")
+    print(f"    static FAIL / model PASS   : {summary.get('static_fail_model_pass', 0)}")
+    print(f"    static FAIL / model UNKNOWN: {summary.get('static_fail_model_unknown', 0)}")
+    print(f"    both FAIL                  : {summary.get('both_fail', 0)}")
+    print()
+    print("  Misses by boundary type:")
+    for boundary, counts in sorted((matrix.get("by_boundary_type") or {}).items()):
+        missed = counts.get("missed_by_model", 0)
+        if missed:
+            print(f"    {boundary:24} {missed}")
+    print()
+
+
 def print_research_submission_status(response: dict) -> None:
     print(f"{C.BOLD}  RESEARCH SUBMISSION{C.RESET}")
     print(f"{'─'*55}")
@@ -463,6 +491,18 @@ def build_parser() -> argparse.ArgumentParser:
     collect_parser.add_argument("--keep-repos", action="store_true", help="Keep cloned repos on disk after collection")
     collect_parser.add_argument("--checkout-root", help="Directory where repos should be cloned")
     add_llm_arguments(collect_parser)
+
+    compare_parser = subparsers.add_parser("compare", help="Compare static and model-assisted AIRA JSON outputs")
+    compare_parser.add_argument("static_result", help="Static AIRA JSON result")
+    compare_parser.add_argument("model_result", help="Model-assisted AIRA JSON result")
+    compare_parser.add_argument("--output", "-o", choices=["terminal", "json"], default="terminal", help="Output format")
+    compare_parser.add_argument("--out-file", "-f", help="Write comparison output to file instead of stdout", default=None)
+    compare_parser.add_argument(
+        "--line-window",
+        type=positive_int("--line-window"),
+        default=5,
+        help="Line distance used for same-location matching",
+    )
     return parser
 
 
@@ -626,6 +666,35 @@ def main() -> None:
                     print(f"{C.RED}Output error: {exc}{C.RESET}", file=sys.stderr)
                     sys.exit(EXIT_INPUT_OR_USAGE)
         sys.exit(EXIT_OK if summary.get("ok") else EXIT_OPERATIONAL_FAILURE)
+
+    if args.command == "compare":
+        try:
+            static_scan = load_scan(args.static_result)
+            model_scan = load_scan(args.model_result)
+            matrix = build_suppression_matrix(static_scan, model_scan, line_window=args.line_window)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"{C.RED}Comparison failed: {exc}{C.RESET}", file=sys.stderr)
+            sys.exit(EXIT_INPUT_OR_USAGE)
+
+        if args.output == "json":
+            output = json.dumps(matrix, indent=2)
+            if args.out_file:
+                try:
+                    write_text_output(args.out_file, output)
+                except ScanTargetError as exc:
+                    print(f"{C.RED}Output error: {exc}{C.RESET}", file=sys.stderr)
+                    sys.exit(EXIT_INPUT_OR_USAGE)
+            else:
+                print(output)
+        else:
+            print_comparison_summary(matrix)
+            if args.out_file:
+                try:
+                    write_text_output(args.out_file, json.dumps(matrix, indent=2))
+                except ScanTargetError as exc:
+                    print(f"{C.RED}Output error: {exc}{C.RESET}", file=sys.stderr)
+                    sys.exit(EXIT_INPUT_OR_USAGE)
+        sys.exit(EXIT_OK)
 
     raise AssertionError(f"unhandled command {args.command!r}")
 

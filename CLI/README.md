@@ -76,6 +76,11 @@ aira scan ./my-project --output yaml
 # Scan with JSON report (for CI/CD integration)
 aira scan ./my-project --output json --out-file report.json
 
+# Compare deterministic and model-assisted JSON outputs
+aira scan ./my-project --engine static --output json --out-file static.json
+aira scan ./my-project --engine llm --provider ollama --model minimax-m2:cloud --output json --out-file model.json
+aira compare static.json model.json --output json --out-file suppression-matrix.json
+
 # Exclude directories
 aira scan ./my-project --exclude node_modules,dist,build
 
@@ -201,6 +206,25 @@ export AIRTABLE_BASE_ID="app..."
 export AIRTABLE_TABLE="Submissions"
 export AIRTABLE_TOKEN="pat..."
 ```
+
+## Location-Aware Output
+
+JSON and YAML scan output now includes deterministic finding identity metadata:
+
+- `fingerprint`: stable per-finding identifier using check, location, snippet, boundary, and enclosing scope
+- `semantic_fingerprint`: location-tolerant identifier for comparing similar findings across runs
+- `location_fingerprint`: check + file + line + boundary identifier
+- `boundary_type`: normalized failure boundary such as `exception_handler`, `fallback_branch`, `environment_gate`, `return_contract`, or `retry_write_boundary`
+- `context`: parser/heuristic context including enclosing function/class, line count, normalized line position, and AST path when available
+- `evidence`: normalized snippet evidence and whether the context came from structural parsing or heuristics
+
+For model-vs-static studies, keep the raw JSON outputs from each run and compare them with:
+
+```bash
+aira compare static.json model.json --line-window 5
+```
+
+The comparison output reports static findings, model findings, same-location matches, model misses, model-only findings, static-FAIL/model-PASS check suppression, and counts by AIRA check and boundary type.
 
 ## Research Submission
 

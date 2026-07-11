@@ -38,6 +38,26 @@ class DeterministicScanTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(first["checks"]["determinism"], "FAIL")
 
+    def test_python_findings_include_location_metadata(self):
+        code = (
+            "def save_record(db, record):\n"
+            "    try:\n"
+            "        db.insert(record)\n"
+            "    except Exception:\n"
+            "        return True\n"
+        )
+
+        result = scan_inline_source(code, "python")
+        finding = next(item for item in result["findings"] if item["check_id"] == "C01")
+
+        self.assertEqual(finding["boundary_type"], "exception_handler")
+        self.assertEqual(finding["context"]["parser"], "python_ast")
+        self.assertEqual(finding["context"]["enclosing_function"], "save_record")
+        self.assertIn("ExceptHandler", finding["context"]["ast_path"])
+        self.assertTrue(finding["fingerprint"])
+        self.assertTrue(finding["semantic_fingerprint"])
+        self.assertTrue(finding["location_fingerprint"])
+
     def test_javascript_decimal_temperature_is_flagged(self):
         result = scan_inline_source(
             "const result = client.chat({ temperature: 0.7, messages });\n",
