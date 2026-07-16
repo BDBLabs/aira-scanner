@@ -20,6 +20,7 @@ AUTO_PROVIDER_ORDER = (
     "ollama",
     "nvidia",
     "groq",
+    "gemini",
     "openrouter",
 )
 MAX_ATTEMPTS_PER_PROVIDER = 2
@@ -61,7 +62,9 @@ def _provider_model(provider: str, config: Optional[LLMConfig] = None) -> Option
     if provider == "nvidia":
         return _env("AIRA_NVIDIA_MODEL", "NVIDIA_MODEL") or "stepfun-ai/step-3.7-flash"
     if provider == "groq":
-        return _env("AIRA_GROQ_MODEL", "GROQ_MODEL") or "llama-3.1-8b-instant"
+        return _env("AIRA_GROQ_MODEL", "GROQ_MODEL")
+    if provider == "gemini":
+        return _env("AIRA_GEMINI_MODEL", "GEMINI_MODEL") or "gemini-2.5-flash"
     if provider == "openrouter":
         return _env("AIRA_OPENROUTER_MODEL", "OPENROUTER_MODEL")
     return None
@@ -87,6 +90,8 @@ def _provider_api_key(provider: str) -> Optional[str]:
         return _env("AIRA_NVIDIA_API_KEY", "NVIDIA_API_KEY")
     if provider == "groq":
         return _env("AIRA_GROQ_API_KEY", "GROQ_API_KEY")
+    if provider == "gemini":
+        return _env("AIRA_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")
     if provider == "openrouter":
         return _env("AIRA_OPENROUTER_API_KEY", "OPENROUTER_API_KEY")
     return None
@@ -101,6 +106,8 @@ def _is_configured(provider: str, config: Optional[LLMConfig] = None) -> bool:
         return bool(_provider_api_key(provider))
     if provider == "groq":
         return bool(_provider_api_key(provider) and _provider_model(provider, config))
+    if provider == "gemini":
+        return bool(_provider_api_key(provider))
     if provider == "openrouter":
         return bool(_provider_api_key(provider) and _provider_model(provider, config))
     return False
@@ -174,7 +181,7 @@ def provider_health_snapshot(config: Optional[LLMConfig] = None) -> Dict[str, An
     ollama_snapshot = _ollama_snapshot(config)
     return {
         "ok": bool(configured),
-        "recommended_provider": "openai-compatible or ollama" if configured and configured[0] in {"openai-compatible", "ollama"} else "openai-compatible",
+        "recommended_provider": "openai-compatible or ollama" if configured and configured[0] in {"openai-compatible", "ollama"} else "nvidia",
         "auto_provider_order": list(AUTO_PROVIDER_ORDER),
         "configured_providers": configured,
         "static_fallback": True,
@@ -295,6 +302,37 @@ def _call_ollama(config: LLMConfig) -> Dict[str, Any]:
     }
 
 
+def _call_nvidia(config: LLMConfig) -> Dict[str, Any]:
+    base_url = "https://integrate.api.nvidia.com/v1"
+    model = _provider_model("nvidia", config)
+    api_key = _provider_api_key("nvidia")
+    if not api_key or not model:
+        raise LLMRoutingError("nvidia is not configured.")
+
+    payload = {
+        "model": model,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+        "messages": _build_messages(config.system_prompt, config.user_prompt),
+    }
+    data = _request_json(
+        "POST",
+        f"{base_url}/chat/completions",
+        payload=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        timeout_seconds=config.timeout_seconds,
+    )
+    return {
+        "provider": "nvidia",
+        "model": model,
+        "text": _ensure_json_text(_parse_openai_compatible_content(data)),
+    }
+
+
 def _call_groq(config: LLMConfig) -> Dict[str, Any]:
     base_url = "https://api.groq.com/openai/v1"
     model = _provider_model("groq", config)
@@ -354,34 +392,37 @@ def _call_openrouter(config: LLMConfig) -> Dict[str, Any]:
     }
 
 
-def _call_nvidia(config: LLMConfig) -> Dict[str, Any]:
-    base_url = "https://integrate.api.nvidia.com/v1"
-    model = _provider_model("nvidia", config)
-    api_key = _provider_api_key("nvidia")
+def _call_gemini(config: LLMConfig) -> Dict[str, Any]:
+    model = _provider_model("gemini", config)
+    api_key = _provider_api_key("gemini")
     if not api_key or not model:
-        raise LLMRoutingError("nvidia is not configured.")
+        raise LLMRoutingError("gemini is not configured.")
 
     payload = {
-        "model": model,
-        "temperature": 0,
-        "response_format": {"type": "json_object"},
-        "messages": _build_messages(config.system_prompt, config.user_prompt),
+        "systemInstruction": {"parts": [{"text": config.system_prompt}]} if config.system_prompt else None,
+        "contents": [{"role": "user", "parts": [{"text": config.user_prompt}]}],
+        "generationConfig": {
+            "temperature": 0,
+            "responseMimeType": "application/json",
+        },
     }
     data = _request_json(
         "POST",
-        f"{base_url}/chat/completions",
+        f"https://generativelanguage.googleapis.com/v1beta/models/{parse.quote(model)}:generateContent?key={parse.quote(api_key)}",
         payload=payload,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
+        headers={"Content-Type": "application/json"},
         timeout_seconds=config.timeout_seconds,
     )
+    text = "".join(
+        part.get("text", "")
+        for candidate in (data.get("candidates") or [])
+        for part in ((candidate.get("content") or {}).get("parts") or [])
+        if isinstance(part, dict)
+    ).strip()
     return {
-        "provider": "nvidia",
+        "provider": "gemini",
         "model": model,
-        "text": _ensure_json_text(_parse_openai_compatible_content(data)),
+        "text": _ensure_json_text(text),
     }
 
 
@@ -400,6 +441,8 @@ def _runner_for(provider: str):
         return _call_nvidia
     if provider == "groq":
         return _call_groq
+    if provider == "gemini":
+        return _call_gemini
     if provider == "openrouter":
         return _call_openrouter
     raise LLMRoutingError(f"Unsupported provider: {provider}")
@@ -412,7 +455,7 @@ def run_llm_json_audit(config: LLMConfig, system_prompt: str, user_prompt: str) 
     provider_order = _resolved_provider_order(config)
     if not provider_order:
         raise LLMRoutingError(
-            "No LLM providers are configured. Set local OpenAI-compatible or Ollama settings, or configure NVIDIA/Groq/OpenRouter."
+            "No LLM providers are configured. Set local OpenAI-compatible or Ollama settings, or configure NVIDIA/Groq/Gemini/OpenRouter."
         )
 
     config.system_prompt = system_prompt
