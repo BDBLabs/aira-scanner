@@ -83,7 +83,7 @@ AIRA currently focuses on patterns such as:
 
 Early-stage research tool.
 Initial scanner and rule set are live.
-Empirical datasets and expanded detection rules are in progress.
+The versioned error-signal inventory and deterministic error-flow graph are live as non-scoring analysis layers. Empirical datasets and calibrated pattern discovery remain in progress.
 
 ## Install
 
@@ -98,6 +98,13 @@ Or from source:
 ```bash
 git clone https://github.com/BDB-Labs/aira-scanner.git
 pip install ./aira-scanner/CLI
+```
+
+Observe error behavior without changing canonical C01-C15 results:
+
+```bash
+aira inventory-errors ./your-project --output json --out-file error-signals.json
+aira error-graph ./your-project --output json --out-file error-graph.json
 ```
 
 ## Documentation
@@ -118,7 +125,7 @@ For readers who need more than the landing-page overview:
 
 The scanner currently supports:
 
-* `Auto` mode: routes through configured providers in order (Ollama → NVIDIA NIM → Groq → OpenRouter)
+* `Auto` mode: routes through configured providers in order (OpenAI-compatible → Ollama → NVIDIA NIM → Groq → Gemini → OpenRouter)
 * deterministic static scanning through `/api/static-scan`
 * Ollama model discovery in health surfaces, including available-model reporting and selected-model validation
 * optional cloud providers:

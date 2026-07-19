@@ -189,7 +189,7 @@ class ResearchHelpersTests(unittest.TestCase):
             },
             clear=False,
         ):
-            with mock.patch("aira.research.request.urlopen", side_effect=fake_urlopen):
+            with mock.patch("aira.research.airtable.request.urlopen", side_effect=fake_urlopen):
                 response = submit_aggregate_research(_sample_result())
 
         self.assertEqual(response["id"], "rec123")
@@ -227,7 +227,7 @@ class ResearchHelpersTests(unittest.TestCase):
             clear=False,
         ):
             with mock.patch(
-                "aira.research._supabase_request_json",
+                "aira.research.supabase._supabase_request_json",
                 side_effect=[
                     [],
                     [],
@@ -300,7 +300,7 @@ class ResearchHelpersTests(unittest.TestCase):
             clear=False,
         ):
             with mock.patch(
-                "aira.research._supabase_request_json",
+                "aira.research.supabase._supabase_request_json",
                 side_effect=[
                     [existing],
                     [],

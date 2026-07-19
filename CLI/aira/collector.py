@@ -26,7 +26,7 @@ from aira.research import (
     _supabase_target,
     submit_aggregate_research,
 )
-from aira.scanner import AIRAScanner
+from aira.scanner import AIRAScanner, ScanResult, result_to_json
 
 
 DEFAULT_MANIFESTS_TABLE = "aira_sample_manifests"
@@ -44,6 +44,40 @@ class CollectionSummary:
     duplicate: bool = False
     manifest_written: bool = False
     error: Optional[str] = None
+    result_path: Optional[str] = None
+    engine: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+
+
+def _safe_result_filename(value: str) -> str:
+    safe = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in value.strip())
+    return safe.strip("._") or "sample"
+
+
+def _write_scan_result(
+    result: ScanResult,
+    results_dir: str | Path,
+    *,
+    sample_name: str,
+    sample_version: str,
+) -> str:
+    output_dir = Path(results_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{_safe_result_filename(sample_name)}--{_safe_result_filename(sample_version)}.json"
+    output_path = output_dir / filename
+    output_path.write_text(result_to_json(result) + "\n", encoding="utf-8")
+    return str(output_path)
+
+
+def _result_metadata_value(result: ScanResult, key: str) -> Optional[str]:
+    value = result.metadata.get(key) if result.metadata else None
+    if value:
+        return str(value)
+    for source in result.metadata.get("sources", []) if result.metadata else []:
+        if isinstance(source, dict) and source.get(key):
+            return str(source[key])
+    return None
 
 
 def _normalize_repo_url(repo: str) -> str:
@@ -225,6 +259,7 @@ def collect_public_repos(
     timeout_seconds: int = 15,
     keep_repos: bool = False,
     checkout_root: Optional[str | Path] = None,
+    results_dir: Optional[str | Path] = None,
 ) -> Dict[str, Any]:
     manifest = load_collection_manifest(manifest_path)
     defaults = manifest.get("defaults") or {}
@@ -252,6 +287,15 @@ def collect_public_repos(
                 scanner = AIRAScanner(str(repo_dir), exclude_dirs=exclude_dirs or [])
                 result = scanner.scan(mode=engine, llm_config=llm_config or LLMConfig())
                 submission_options = _submission_options_for_sample(sample, commit_sha, defaults)
+                result_path = None
+                if results_dir:
+                    result_path = _write_scan_result(
+                        result,
+                        results_dir,
+                        sample_name=submission_options["sample_name"],
+                        sample_version=submission_options["sample_version"],
+                    )
+
                 response = None
                 manifest_written = False
                 if submit_research_aggregate_flag:
@@ -284,6 +328,10 @@ def collect_public_repos(
                         research_submission_id=(response or {}).get("id"),
                         duplicate=bool((response or {}).get("duplicate")),
                         manifest_written=manifest_written,
+                        result_path=result_path,
+                        engine=str(result.metadata.get("mode") or result.metadata.get("engine") or engine),
+                        provider=_result_metadata_value(result, "provider") or result.metadata.get("engine"),
+                        model=_result_metadata_value(result, "model"),
                     )
                 )
             except (KeyboardInterrupt, SystemExit):
@@ -308,6 +356,7 @@ def collect_public_repos(
                         findings_total=0,
                         checks_failed=0,
                         error=str(exc),
+                        engine=engine,
                     )
                 )
                 errors.append({"repo": repo_label, "error": str(exc)})

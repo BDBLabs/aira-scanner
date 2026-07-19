@@ -13,6 +13,7 @@ from pathlib import Path
 try:
     from aira import __version__
     from aira.comparison import build_suppression_matrix, load_scan
+    from aira.error_graph import build_error_graph, error_graph_for_target
     from aira.llm import LLMConfig, LLMRoutingError, provider_health_snapshot
     from aira.collector import collect_public_repos
     from aira.research import ResearchSubmissionError, check_research_connection, submit_aggregate_research
@@ -27,10 +28,13 @@ try:
         result_to_yaml,
         validate_scan_target,
     )
+    from aira.signals import inventory_errors
+    from aira.study import compare_study_results, load_study_jsonl, run_study_manifest, write_study_jsonl
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from aira import __version__
     from aira.comparison import build_suppression_matrix, load_scan
+    from aira.error_graph import build_error_graph, error_graph_for_target
     from aira.llm import LLMConfig, LLMRoutingError, provider_health_snapshot
     from aira.collector import collect_public_repos
     from aira.research import ResearchSubmissionError, check_research_connection, submit_aggregate_research
@@ -45,6 +49,8 @@ except ImportError:
         result_to_yaml,
         validate_scan_target,
     )
+    from aira.signals import inventory_errors
+    from aira.study import compare_study_results, load_study_jsonl, run_study_manifest, write_study_jsonl
 
 
 class C:
@@ -100,6 +106,15 @@ def print_summary(result: ScanResult) -> None:
     print(f"  Target:          {result.target}")
     print(f"  Scanned at:      {result.scanned_at}")
     print(f"  Files scanned:   {summary['files_scanned']}")
+    if "files_discovered" in summary:
+        print(
+            "  Coverage:        "
+            f"{summary.get('scan_completeness', 'unavailable')} "
+            f"(analyzed={summary.get('files_analyzed', 0)}, "
+            f"partial={summary.get('files_partial', 0)}, "
+            f"failed={summary.get('files_failed', 0)}, "
+            f"omitted={summary.get('files_omitted', 0)})"
+        )
     print(f"  Total findings:  {C.BOLD}{summary['findings_total']}{C.RESET}")
     if metadata.get("mode"):
         provider = metadata.get("provider") or metadata.get("engine")
@@ -171,6 +186,45 @@ def print_human_review_notice() -> None:
     print("    C12 — Source-to-Output Lineage")
     print("         Check: Do all derived objects carry source + location metadata?")
     print(f"{'─'*55}{C.RESET}\n")
+
+
+def print_signal_inventory_summary(inventory: dict) -> None:
+    summary = inventory["summary"]
+    print_banner()
+    print(f"{C.BOLD}  ERROR SIGNAL INVENTORY{C.RESET}")
+    print(f"{'─'*55}")
+    print(f"  Target:          {inventory['target']}")
+    print(f"  Artifacts:       {summary['artifacts_discovered']}")
+    print(
+        "  Parser coverage: "
+        f"analyzed={summary['artifacts_analyzed']}, "
+        f"partial={summary['artifacts_partial']}, "
+        f"failed={summary['artifacts_failed']}"
+    )
+    print(f"  Signals:         {summary['signals_total']}")
+    if summary["signals_by_kind"]:
+        print("  Signal kinds:")
+        for kind, count in summary["signals_by_kind"].items():
+            print(f"    {kind:20} {count}")
+    print()
+
+
+def print_error_graph_summary(graph: dict) -> None:
+    summary = graph["summary"]
+    print_banner()
+    print(f"{C.BOLD}  ERROR FLOW GRAPH{C.RESET}")
+    print(f"{'─'*55}")
+    print(f"  Target:          {graph['target']}")
+    print(f"  Nodes:           {summary['nodes_total']}")
+    print(f"  Signals:         {summary['signal_nodes']}")
+    print(f"  Symbols:         {summary['symbol_nodes']}")
+    print(f"  Edges:           {summary['edges_total']}")
+    print(f"  Unresolved calls:{summary['unresolved_call_nodes']:>9}")
+    if summary["edges_by_kind"]:
+        print("  Edge kinds:")
+        for kind, count in summary["edges_by_kind"].items():
+            print(f"    {kind:20} {count}")
+    print()
 
 
 def print_health(snapshot: dict) -> None:
@@ -279,6 +333,12 @@ def print_collection_summary(summary: dict) -> None:
             print(f"    submission_id: {sample.get('research_submission_id')}")
         if sample.get("manifest_written"):
             print("    manifest:      written")
+        if sample.get("result_path"):
+            print(f"    result_path:   {sample.get('result_path')}")
+        if sample.get("provider"):
+            print(f"    provider:      {sample.get('provider')}")
+        if sample.get("model"):
+            print(f"    model:         {sample.get('model')}")
         if sample.get("error"):
             print(f"    error:         {sample.get('error')}")
     print()
@@ -307,6 +367,71 @@ def print_comparison_summary(matrix: dict) -> None:
         missed = counts.get("missed_by_model", 0)
         if missed:
             print(f"    {boundary:24} {missed}")
+    print()
+
+
+def print_study_run_summary(summary: dict, output_path=None) -> None:
+    print_banner()
+    print(f"{C.BOLD}  AIRA STUDY RUN{C.RESET}")
+    print(f"{'─'*55}")
+    print(f"  Study id:        {summary.get('study_id', 'n/a')}")
+    print(f"  Run id:          {summary.get('run_id', 'n/a')}")
+    print(f"  Samples:         {summary.get('sample_count', 0)}")
+    print(f"  Result rows:     {summary.get('row_count', 0)}")
+    print(f"  OK rows:         {summary.get('ok_count', 0)}")
+    print(f"  Error rows:      {summary.get('error_count', 0)}")
+    if output_path:
+        print(f"  JSONL output:    {output_path}")
+    print()
+    print("  Runs:")
+    for key, counts in sorted((summary.get("by_run") or {}).items()):
+        print(
+            f"    {key}: rows={counts.get('rows', 0)} "
+            f"ok={counts.get('ok', 0)} error={counts.get('error', 0)}"
+        )
+    errors = summary.get("errors") or []
+    if errors:
+        print()
+        print("  Errors:")
+        for error in errors[:5]:
+            label = error.get("engine") or "sample"
+            print(f"    {error.get('sample_id', 'unknown')} [{label}]: {error.get('error', '')}")
+        if len(errors) > 5:
+            print(f"    ... {len(errors) - 5} more")
+    print()
+
+
+def print_study_comparison_summary(report: dict) -> None:
+    print_banner()
+    print(f"{C.BOLD}  AIRA STUDY COMPARISON{C.RESET}")
+    print(f"{'─'*55}")
+    print(f"  Baseline engine: {report.get('baseline_engine', 'static')}")
+    print(f"  Line window:     {report.get('line_window', 'n/a')}")
+    print(f"  Baselines:       {report.get('baseline_samples', 0)}")
+    print(f"  Candidate rows:  {report.get('candidate_rows', 0)}")
+    print(f"  Skipped rows:    {len(report.get('skipped') or [])}")
+    print()
+    by_model = report.get("by_model") or {}
+    if not by_model:
+        print("  No model rows were compared.")
+        print()
+        return
+    for model_key, aggregate in sorted(by_model.items()):
+        summary = aggregate.get("summary") or {}
+        print(f"  {model_key}")
+        print(f"    samples compared: {aggregate.get('samples_compared', 0)}")
+        print(f"    static findings:  {summary.get('static_findings', 0)}")
+        print(f"    model findings:   {summary.get('model_findings', 0)}")
+        print(f"    ratio:            {summary.get('static_to_model_finding_ratio', 'n/a')}:1")
+        print(f"    matched/missed:   {summary.get('matched_by_model', 0)}/{summary.get('missed_by_model', 0)}")
+        missed_boundaries = [
+            (boundary, counts.get("missed_by_model", 0))
+            for boundary, counts in (aggregate.get("by_boundary_type") or {}).items()
+            if counts.get("missed_by_model", 0)
+        ]
+        if missed_boundaries:
+            top = ", ".join(f"{boundary}={count}" for boundary, count in sorted(missed_boundaries)[:5])
+            print(f"    missed boundaries: {top}")
     print()
 
 
@@ -382,11 +507,10 @@ def exit_code_for_result(result: ScanResult, fail_on: str) -> int:
     return EXIT_OK
 
 
-def add_llm_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--engine", choices=["static", "llm", "hybrid"], default="static", help="Scan engine mode")
+def add_llm_provider_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--provider",
-        choices=["auto", "openai-compatible", "ollama", "nvidia", "groq", "openrouter"],
+        choices=["auto", "openai-compatible", "ollama", "nvidia", "groq", "gemini", "openrouter"],
         default="auto",
         help="LLM provider to use when engine is llm or hybrid",
     )
@@ -404,6 +528,11 @@ def add_llm_arguments(parser: argparse.ArgumentParser) -> None:
         default=120_000,
         help="Maximum source characters sent to LLM scans",
     )
+
+
+def add_llm_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--engine", choices=["static", "llm", "hybrid"], default="static", help="Scan engine mode")
+    add_llm_provider_arguments(parser)
 
 
 def add_research_arguments(parser: argparse.ArgumentParser) -> None:
@@ -451,8 +580,58 @@ def build_parser() -> argparse.ArgumentParser:
         default="high",
         help="Exit with code 1 when findings at or above this severity exist",
     )
+    scan_parser.add_argument(
+        "--include-signal-inventory",
+        action="store_true",
+        help="Attach the non-scoring ErrorSignal inventory to scan metadata",
+    )
+    scan_parser.add_argument(
+        "--include-error-graph",
+        action="store_true",
+        help="Attach the non-scoring deterministic error-flow graph to scan metadata",
+    )
     add_llm_arguments(scan_parser)
     add_research_arguments(scan_parser)
+
+    inventory_parser = subparsers.add_parser(
+        "inventory-errors",
+        help="Inventory error signals and parser capability without assigning risk",
+    )
+    inventory_parser.add_argument("target", help="File or directory to inventory")
+    inventory_parser.add_argument(
+        "--output",
+        "-o",
+        choices=["terminal", "json"],
+        default="json",
+        help="Output format",
+    )
+    inventory_parser.add_argument(
+        "--exclude",
+        "-e",
+        help="Comma-separated list of directories, files, or glob patterns to exclude",
+        default="",
+    )
+    inventory_parser.add_argument("--out-file", "-f", help="Write output JSON to file", default=None)
+
+    graph_parser = subparsers.add_parser(
+        "error-graph",
+        help="Build a deterministic, evidence-backed graph over error signals",
+    )
+    graph_parser.add_argument("target", help="File or directory to graph")
+    graph_parser.add_argument(
+        "--output",
+        "-o",
+        choices=["terminal", "json"],
+        default="json",
+        help="Output format",
+    )
+    graph_parser.add_argument(
+        "--exclude",
+        "-e",
+        help="Comma-separated list of directories, files, or glob patterns to exclude",
+        default="",
+    )
+    graph_parser.add_argument("--out-file", "-f", help="Write graph JSON to file", default=None)
 
     health_parser = subparsers.add_parser("health", help="Show provider health/configuration")
     health_parser.add_argument("--json", action="store_true", help="Emit health snapshot as JSON")
@@ -490,6 +669,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     collect_parser.add_argument("--keep-repos", action="store_true", help="Keep cloned repos on disk after collection")
     collect_parser.add_argument("--checkout-root", help="Directory where repos should be cloned")
+    collect_parser.add_argument("--results-dir", help="Directory where per-sample JSON scan results should be written")
     add_llm_arguments(collect_parser)
 
     compare_parser = subparsers.add_parser("compare", help="Compare static and model-assisted AIRA JSON outputs")
@@ -503,6 +683,39 @@ def build_parser() -> argparse.ArgumentParser:
         default=5,
         help="Line distance used for same-location matching",
     )
+
+    study_parser = subparsers.add_parser("study", help="Run and compare manifest-driven AIRA studies")
+    study_subparsers = study_parser.add_subparsers(dest="study_command", required=True)
+
+    study_run_parser = study_subparsers.add_parser("run", help="Run a study manifest and preserve raw JSONL results")
+    study_run_parser.add_argument("manifest", help="Path to YAML/JSON study manifest")
+    study_run_parser.add_argument(
+        "--engines",
+        default="static",
+        help="Comma-separated scan engines to run for every sample: static,llm,hybrid",
+    )
+    study_run_parser.add_argument(
+        "--models",
+        help="Comma-separated provider:model specs for llm/hybrid runs, for example ollama:minimax-m2:cloud",
+    )
+    study_run_parser.add_argument("--exclude", "-e", help="Comma-separated list of directories, files, or glob patterns to exclude", default="")
+    study_run_parser.add_argument("--output", "-o", choices=["terminal", "json", "jsonl"], default="terminal", help="Stdout output format")
+    study_run_parser.add_argument("--out-file", "-f", help="Write raw study JSONL rows to file", default=None)
+    study_run_parser.add_argument("--summary-file", help="Write study summary JSON to file", default=None)
+    study_run_parser.add_argument("--fail-fast", action="store_true", help="Abort the study on the first sample or engine error")
+    add_llm_provider_arguments(study_run_parser)
+
+    study_compare_parser = study_subparsers.add_parser("compare", help="Compare study JSONL rows against a baseline engine")
+    study_compare_parser.add_argument("results_jsonl", help="Study JSONL file produced by 'aira study run'")
+    study_compare_parser.add_argument("--baseline-engine", default="static", help="Engine to use as the deterministic baseline")
+    study_compare_parser.add_argument(
+        "--line-window",
+        type=positive_int("--line-window"),
+        default=5,
+        help="Line distance used for same-location matching",
+    )
+    study_compare_parser.add_argument("--output", "-o", choices=["terminal", "json"], default="terminal", help="Output format")
+    study_compare_parser.add_argument("--out-file", "-f", help="Write comparison report JSON to file instead of stdout", default=None)
     return parser
 
 
@@ -526,6 +739,14 @@ def main() -> None:
         try:
             scanner = AIRAScanner(str(resolved_target), exclude_dirs=exclude)
             result = scanner.scan(mode=args.engine, llm_config=llm_config)
+            if args.include_signal_inventory or args.include_error_graph:
+                signal_inventory = inventory_errors(resolved_target, exclude_patterns=exclude)
+                additions = {}
+                if args.include_signal_inventory:
+                    additions["signal_inventory"] = signal_inventory
+                if args.include_error_graph:
+                    additions["error_graph"] = build_error_graph(signal_inventory)
+                result.metadata = {**result.metadata, **additions}
         except ScannerInputError as exc:
             label = "Cannot complete scan" if "No supported source files found" in str(exc) else "Input error"
             print(f"{C.RED}{label}: {exc}{C.RESET}", file=sys.stderr)
@@ -543,7 +764,10 @@ def main() -> None:
             print(f"{C.RED}Unexpected scan failure: {exc}{C.RESET}", file=sys.stderr)
             sys.exit(EXIT_OPERATIONAL_FAILURE)
 
-        empty_reason = describe_empty_scan_result(scanner, result.files_scanned)
+        empty_reason = describe_empty_scan_result(
+            scanner,
+            int(result.summary.get("files_discovered", result.files_scanned)),
+        )
         if empty_reason:
             print(f"{C.RED}Cannot complete scan: {empty_reason}{C.RESET}", file=sys.stderr)
             sys.exit(EXIT_INPUT_OR_USAGE)
@@ -605,6 +829,60 @@ def main() -> None:
                 print(f"{C.GREEN}  ✓ Scan complete — no findings at or above '{args.fail_on}'.{C.RESET}\n")
         sys.exit(exit_code)
 
+    if args.command == "inventory-errors":
+        target_arg = Path(args.target).expanduser()
+        try:
+            validate_scan_target(target_arg)
+            resolved_target = target_arg.resolve(strict=False)
+            exclude = [item.strip() for item in args.exclude.split(",") if item.strip()]
+            inventory = inventory_errors(resolved_target, exclude_patterns=exclude)
+        except (ScanTargetError, ValueError) as exc:
+            print(f"{C.RED}Inventory input error: {exc}{C.RESET}", file=sys.stderr)
+            sys.exit(EXIT_INPUT_OR_USAGE)
+        except Exception as exc:
+            print(f"{C.RED}Inventory failed: {exc}{C.RESET}", file=sys.stderr)
+            sys.exit(EXIT_OPERATIONAL_FAILURE)
+
+        output = json.dumps(inventory, indent=2)
+        if args.out_file:
+            try:
+                write_text_output(args.out_file, output)
+            except ScanTargetError as exc:
+                print(f"{C.RED}Output error: {exc}{C.RESET}", file=sys.stderr)
+                sys.exit(EXIT_INPUT_OR_USAGE)
+        elif args.output == "json":
+            print(output)
+        if args.output == "terminal":
+            print_signal_inventory_summary(inventory)
+        sys.exit(EXIT_OK)
+
+    if args.command == "error-graph":
+        target_arg = Path(args.target).expanduser()
+        try:
+            validate_scan_target(target_arg)
+            resolved_target = target_arg.resolve(strict=False)
+            exclude = [item.strip() for item in args.exclude.split(",") if item.strip()]
+            graph = error_graph_for_target(str(resolved_target), exclude_patterns=exclude)
+        except (ScanTargetError, ValueError) as exc:
+            print(f"{C.RED}Graph input error: {exc}{C.RESET}", file=sys.stderr)
+            sys.exit(EXIT_INPUT_OR_USAGE)
+        except Exception as exc:
+            print(f"{C.RED}Graph generation failed: {exc}{C.RESET}", file=sys.stderr)
+            sys.exit(EXIT_OPERATIONAL_FAILURE)
+
+        output = json.dumps(graph, indent=2)
+        if args.out_file:
+            try:
+                write_text_output(args.out_file, output)
+            except ScanTargetError as exc:
+                print(f"{C.RED}Output error: {exc}{C.RESET}", file=sys.stderr)
+                sys.exit(EXIT_INPUT_OR_USAGE)
+        elif args.output == "json":
+            print(output)
+        if args.output == "terminal":
+            print_error_graph_summary(graph)
+        sys.exit(EXIT_OK)
+
     if args.command == "health":
         snapshot = provider_health_snapshot(build_llm_config(args))
         research_snapshot = check_research_connection(timeout_seconds=args.research_timeout) if args.check_research else None
@@ -641,6 +919,7 @@ def main() -> None:
                 timeout_seconds=args.research_timeout,
                 keep_repos=args.keep_repos,
                 checkout_root=args.checkout_root,
+                results_dir=args.results_dir,
             )
         except (ValueError, ResearchSubmissionError, LLMRoutingError) as exc:
             print(f"{C.RED}Collection failed: {exc}{C.RESET}", file=sys.stderr)
@@ -666,6 +945,85 @@ def main() -> None:
                     print(f"{C.RED}Output error: {exc}{C.RESET}", file=sys.stderr)
                     sys.exit(EXIT_INPUT_OR_USAGE)
         sys.exit(EXIT_OK if summary.get("ok") else EXIT_OPERATIONAL_FAILURE)
+
+    if args.command == "study":
+        if args.study_command == "run":
+            exclude = [item.strip() for item in args.exclude.split(",") if item.strip()]
+            try:
+                study_result = run_study_manifest(
+                    args.manifest,
+                    engines=args.engines,
+                    model_specs=args.models,
+                    llm_config=build_llm_config(args),
+                    exclude_dirs=exclude,
+                    fail_fast=args.fail_fast,
+                )
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                print(f"{C.RED}Study manifest failed: {exc}{C.RESET}", file=sys.stderr)
+                sys.exit(EXIT_INPUT_OR_USAGE)
+            except ScannerInputError as exc:
+                print(f"{C.RED}Study input failed: {exc}{C.RESET}", file=sys.stderr)
+                sys.exit(EXIT_INPUT_OR_USAGE)
+            except LLMRoutingError as exc:
+                print(f"{C.RED}Study LLM scan failed: {exc}{C.RESET}", file=sys.stderr)
+                sys.exit(exit_code_for_llm_error(exc))
+            except ScannerExecutionError as exc:
+                print(f"{C.RED}Study scan failed: {exc}{C.RESET}", file=sys.stderr)
+                sys.exit(EXIT_OPERATIONAL_FAILURE)
+            except Exception as exc:
+                print(f"{C.RED}Unexpected study failure: {exc}{C.RESET}", file=sys.stderr)
+                sys.exit(EXIT_OPERATIONAL_FAILURE)
+
+            output_path = None
+            if args.out_file:
+                try:
+                    output_path = write_study_jsonl(args.out_file, study_result["rows"])
+                except OSError as exc:
+                    print(f"{C.RED}Output error: Could not write study JSONL: {exc}{C.RESET}", file=sys.stderr)
+                    sys.exit(EXIT_INPUT_OR_USAGE)
+            if args.summary_file:
+                try:
+                    write_text_output(args.summary_file, json.dumps(study_result["summary"], indent=2))
+                except ScanTargetError as exc:
+                    print(f"{C.RED}Output error: {exc}{C.RESET}", file=sys.stderr)
+                    sys.exit(EXIT_INPUT_OR_USAGE)
+
+            if args.output == "json":
+                print(json.dumps(study_result, indent=2))
+            elif args.output == "jsonl":
+                for row in study_result["rows"]:
+                    print(json.dumps(row, sort_keys=True))
+            else:
+                print_study_run_summary(study_result["summary"], output_path=output_path)
+            sys.exit(EXIT_OK if study_result["summary"].get("error_count", 0) == 0 else EXIT_OPERATIONAL_FAILURE)
+
+        if args.study_command == "compare":
+            try:
+                rows = load_study_jsonl(args.results_jsonl)
+                report = compare_study_results(rows, baseline_engine=args.baseline_engine, line_window=args.line_window)
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                print(f"{C.RED}Study comparison failed: {exc}{C.RESET}", file=sys.stderr)
+                sys.exit(EXIT_INPUT_OR_USAGE)
+
+            output = json.dumps(report, indent=2)
+            if args.output == "json":
+                if args.out_file:
+                    try:
+                        write_text_output(args.out_file, output)
+                    except ScanTargetError as exc:
+                        print(f"{C.RED}Output error: {exc}{C.RESET}", file=sys.stderr)
+                        sys.exit(EXIT_INPUT_OR_USAGE)
+                else:
+                    print(output)
+            else:
+                print_study_comparison_summary(report)
+                if args.out_file:
+                    try:
+                        write_text_output(args.out_file, output)
+                    except ScanTargetError as exc:
+                        print(f"{C.RED}Output error: {exc}{C.RESET}", file=sys.stderr)
+                        sys.exit(EXIT_INPUT_OR_USAGE)
+            sys.exit(EXIT_OK)
 
     if args.command == "compare":
         try:

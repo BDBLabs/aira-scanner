@@ -39,6 +39,13 @@ class PythonChecker:
             self.tree = None
             self.parse_ok = False
             self.parse_error = exc
+        self.parents = {}
+        if self.tree is not None:
+            self.parents = {
+                child: parent
+                for parent in ast.walk(self.tree)
+                for child in ast.iter_child_nodes(parent)
+            }
         self.findings: List[Finding] = []
 
     def run(self) -> List[Finding]:
@@ -118,6 +125,35 @@ class PythonChecker:
                           "Broad exception handler does not re-raise — verify failure is intentionally absorbed")
 
     # ── CHECK 1: Success Integrity ────────────────────────────────
+    @staticmethod
+    def _constant_value(node):
+        return node.value if isinstance(node, ast.Constant) else None
+
+    @classmethod
+    def _dict_returns_success(cls, value: ast.Dict) -> bool:
+        pairs = []
+        for key, item_value in zip(value.keys, value.values):
+            key_value = cls._constant_value(key)
+            if key_value is None:
+                continue
+            pairs.append((str(key_value).lower(), cls._constant_value(item_value)))
+
+        explicit_failure = any(
+            (key in {"success", "ok"} and item_value is False)
+            or (key == "status" and str(item_value).lower() in {"error", "failed", "failure", "invalid"})
+            for key, item_value in pairs
+        )
+        if explicit_failure:
+            return False
+        return any(
+            (key in {"success", "ok"} and item_value is True)
+            or (
+                key == "status"
+                and str(item_value).lower() in {"ok", "success", "succeeded", "complete", "completed", "ready"}
+            )
+            for key, item_value in pairs
+        )
+
     def _check_success_integrity(self):
         """Flag try blocks in functions that return success-like values after catching errors."""
         for node in ast.walk(self.tree):
@@ -125,21 +161,17 @@ class PythonChecker:
                 continue
             for handler in node.handlers:
                 # Look for return True / return {"status": "ok"} / return success_obj inside handler
-                for child in ast.walk(ast.Module(body=handler.body, type_ignores=[])):
-                    if isinstance(child, ast.Return):
-                        val = child.value
-                        # return True
-                        if isinstance(val, ast.Constant) and val.value is True:
-                            self._add("C01", "SUCCESS INTEGRITY", "HIGH",
-                                      getattr(child, 'lineno', node.lineno),
-                                      "Exception handler returns True — may misrepresent success after failure")
-                        # return {"status": "ok"} or similar dict with success key
-                        if isinstance(val, ast.Dict):
-                            for k in val.keys:
-                                if isinstance(k, ast.Constant) and str(k.value).lower() in ("status", "success", "ok", "result"):
-                                    self._add("C01", "SUCCESS INTEGRITY", "HIGH",
-                                              getattr(child, 'lineno', node.lineno),
-                                              "Exception handler returns success-shaped dict — verify this is intentional")
+                handler_scope = ast.Module(body=handler.body, type_ignores=[])
+                for child in self._iter_returns_in_scope(handler_scope):
+                    val = child.value
+                    if isinstance(val, ast.Constant) and val.value is True:
+                        self._add("C01", "SUCCESS INTEGRITY", "HIGH",
+                                  getattr(child, 'lineno', node.lineno),
+                                  "Exception handler returns True — may misrepresent success after failure")
+                    elif isinstance(val, ast.Dict) and self._dict_returns_success(val):
+                        self._add("C01", "SUCCESS INTEGRITY", "HIGH",
+                                  getattr(child, 'lineno', node.lineno),
+                                  "Exception handler returns an explicit success result after failure")
 
     # ── CHECK 2: Audit / Evidence Integrity ──────────────────────
     def _check_audit_integrity(self):
@@ -220,6 +252,81 @@ class PythonChecker:
                           f"caller may not distinguish failure vs absence vs disabled (lines: {none_returns})")
 
     # ── CHECK 8: Unsupervised Background Tasks ────────────────────
+    def _ancestor(self, node, node_types):
+        current = self.parents.get(node)
+        while current is not None:
+            if isinstance(current, node_types):
+                return current
+            current = self.parents.get(current)
+        return None
+
+    @staticmethod
+    def _assigned_names(parent) -> set:
+        targets = []
+        if isinstance(parent, ast.Assign):
+            targets = parent.targets
+        elif isinstance(parent, ast.AnnAssign):
+            targets = [parent.target]
+        elif isinstance(parent, ast.NamedExpr):
+            targets = [parent.target]
+        return {
+            child.id
+            for target in targets
+            for child in ast.walk(target)
+            if isinstance(child, ast.Name)
+        }
+
+    @staticmethod
+    def _task_group_names(scope) -> set:
+        names = set()
+        if scope is None:
+            return names
+        for node in ast.walk(scope):
+            if not isinstance(node, ast.AsyncWith):
+                continue
+            for item in node.items:
+                context = item.context_expr
+                if not isinstance(context, ast.Call):
+                    continue
+                func = context.func
+                func_name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+                if func_name == "TaskGroup" and isinstance(item.optional_vars, ast.Name):
+                    names.add(item.optional_vars.id)
+        return names
+
+    def _task_is_supervised(self, node: ast.Call) -> bool:
+        if self._ancestor(node, ast.Await) is not None:
+            return True
+
+        scope = self._ancestor(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+            if node.func.value.id in self._task_group_names(scope):
+                return True
+
+        assigned_names = self._assigned_names(self.parents.get(node))
+        if not assigned_names or scope is None:
+            return False
+        for child in ast.walk(scope):
+            if isinstance(child, ast.Await):
+                awaited_names = {item.id for item in ast.walk(child.value) if isinstance(item, ast.Name)}
+                if assigned_names & awaited_names:
+                    return True
+            if not isinstance(child, ast.Call):
+                continue
+            func = child.func
+            name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+            if name not in {"gather", "wait", "as_completed"}:
+                continue
+            consumed_names = {
+                item.id
+                for argument in child.args
+                for item in ast.walk(argument)
+                if isinstance(item, ast.Name)
+            }
+            if assigned_names & consumed_names:
+                return True
+        return False
+
     def _check_background_tasks(self):
         for node in ast.walk(self.tree):
             if not isinstance(node, ast.Call):
@@ -231,7 +338,8 @@ class PythonChecker:
             elif isinstance(func, ast.Name):
                 name = func.id
             if name in ("create_task", "ensure_future"):
-                # Check if result is assigned or awaited (supervision signal)
+                if self._task_is_supervised(node):
+                    continue
                 lineno = getattr(node, 'lineno', 0)
                 self._add("C08", "UNSUPERVISED BACKGROUND TASKS", "MEDIUM",
                           lineno,
@@ -239,17 +347,23 @@ class PythonChecker:
 
     # ── CHECK 9: Environment-Dependent Safety ─────────────────────
     def _check_environment_safety(self):
-        env_patterns = [
-            r'\bif\s+.*(?:debug|dev|staging|test|development).*:',
-            r'\bENV\s*[!=]=\s*["\'](?:dev|development|staging|test)',
-            r'\bENVIRONMENT\s*[!=]=\s*["\'](?:dev|development|staging)',
-            r'(?:skip|disable|bypass|relax).*(?:valid|check|auth|security)',
-        ]
-        for i, line in enumerate(self.lines, start=1):
-            for pattern in env_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    self._add("C09", "ENVIRONMENT-DEPENDENT SAFETY", "HIGH",
-                              i, f"Possible environment-conditional safety logic: '{line.strip()}'")
+        environment_terms = ("debug", "dev", "development", "staging", "test", "environment", "node_env")
+        safety_terms = ("skip", "disable", "bypass", "relax", "valid", "check", "auth", "security", "guard")
+        for node in ast.walk(self.tree):
+            if not isinstance(node, ast.If):
+                continue
+            condition = ast.unparse(node.test).lower()
+            body = " ".join(ast.unparse(statement).lower() for statement in node.body)
+            has_environment_gate = any(term in condition for term in environment_terms)
+            has_safety_effect = any(term in f"{condition} {body}" for term in safety_terms)
+            if has_environment_gate and has_safety_effect:
+                self._add(
+                    "C09",
+                    "ENVIRONMENT-DEPENDENT SAFETY",
+                    "HIGH",
+                    node.lineno,
+                    "Environment-dependent branch appears to alter validation, authorization, or safety behavior",
+                )
 
     # ── CHECK 10: Startup Integrity ───────────────────────────────
     def _check_startup_integrity(self):
@@ -278,17 +392,28 @@ class PythonChecker:
 
     # ── CHECK 11: Deterministic Reasoning Drift ───────────────────
     def _check_determinism(self):
-        non_determinism_patterns = [
-            r'\btemperature\s*=\s*(?:0?\.\d*[1-9]\d*|[1-9]\d*(?:\.\d+)?)',
-            r'"temperature"\s*:\s*(?:0?\.\d*[1-9]\d*|[1-9]\d*(?:\.\d+)?)',
-            r"'temperature'\s*:\s*(?:0?\.\d*[1-9]\d*|[1-9]\d*(?:\.\d+)?)",
-        ]
-        for i, line in enumerate(self.lines, start=1):
-            for pattern in non_determinism_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    self._add("C11", "DETERMINISTIC REASONING DRIFT", "HIGH",
-                              i, f"Non-zero temperature detected in model call — "
-                                 f"verify this is not a commit or governance decision path: '{line.strip()}'")
+        candidates = []
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.keyword) and node.arg == "temperature":
+                candidates.append((node.value, getattr(node, "lineno", 0)))
+            elif isinstance(node, ast.Dict):
+                for key, value in zip(node.keys, node.values):
+                    if isinstance(key, ast.Constant) and str(key.value).lower() == "temperature":
+                        candidates.append((value, getattr(value, "lineno", getattr(node, "lineno", 0))))
+
+        seen_lines = set()
+        for value, line in candidates:
+            numeric = value.value if isinstance(value, ast.Constant) else None
+            if not isinstance(numeric, (int, float)) or isinstance(numeric, bool) or numeric == 0 or line in seen_lines:
+                continue
+            seen_lines.add(line)
+            self._add(
+                "C11",
+                "DETERMINISTIC REASONING DRIFT",
+                "HIGH",
+                line,
+                "Non-zero temperature detected in model call or model configuration",
+            )
 
     # ── CHECK 13: Confidence Misrepresentation ────────────────────
     def _check_confidence_misrepresentation(self):

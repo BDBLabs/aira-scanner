@@ -54,6 +54,7 @@ class DeterministicScanTests(unittest.TestCase):
         self.assertEqual(finding["context"]["parser"], "python_ast")
         self.assertEqual(finding["context"]["enclosing_function"], "save_record")
         self.assertIn("ExceptHandler", finding["context"]["ast_path"])
+        self.assertEqual(finding["fingerprint_version"], "aira-finding-v1")
         self.assertTrue(finding["fingerprint"])
         self.assertTrue(finding["semantic_fingerprint"])
         self.assertTrue(finding["location_fingerprint"])
@@ -97,7 +98,12 @@ class DeterministicScanTests(unittest.TestCase):
                 result = scan_inline_source("try { writeAudit(event); } catch (e) { return true; }", lang)
                 self.assertEqual(result["meta"]["language"], "javascript")
                 self.assertEqual(result["checks"]["audit_integrity"], "FAIL")
-                self.assertEqual(result["summary"]["files_scanned"], 1)
+                self.assertEqual(result["summary"]["files_discovered"], 1)
+                if result["meta"]["parser_backed"]:
+                    self.assertEqual(result["summary"]["files_scanned"], 1)
+                else:
+                    self.assertEqual(result["summary"]["files_scanned"], 0)
+                    self.assertEqual(result["summary"]["files_partial"], 1)
 
     def test_multi_file_deterministic_scan_matches_directory_style_behavior(self):
         result = scan_inline_sources([
@@ -126,7 +132,10 @@ class DeterministicScanTests(unittest.TestCase):
         self.assertEqual(result["checks"]["success_integrity"], "FAIL")
         self.assertEqual(result["checks"]["audit_integrity"], "FAIL")
         self.assertTrue(any(finding["file"] == "src/service.py" for finding in result["findings"]))
-        self.assertTrue(any(finding["file"] == "tests/test_service.py" for finding in result["findings"]))
+        self.assertTrue(any(
+            artifact["path"] == "tests/test_service.py"
+            for artifact in result["meta"]["artifact_manifest"]
+        ))
         self.assertIn("logic_consistency (C07)", result["summary"]["requires_human_review"])
 
 

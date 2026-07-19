@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aira.bageltech.net/schemas/error-graph-v1.json",
+  "title": "AIRA Error Graph v1",
+  "type": "object",
+  "required": ["schema_version", "inventory_schema_version", "target", "summary", "nodes", "edges"],
+  "properties": {
+    "schema_version": {"const": "aira-error-graph-v1"},
+    "inventory_schema_version": {"const": "aira-error-inventory-v1"},
+    "target": {"type": "string"},
+    "summary": {"type": "object"},
+    "parser_diagnostics": {"type": "array", "items": {"type": "object"}},
+    "nodes": {"type": "array", "items": {"type": "object"}},
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["edge_id", "kind", "source", "target", "resolved", "confidence", "evidence"]
+      }
+    }
+  },
+  "additionalProperties": false
+}

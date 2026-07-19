@@ -67,6 +67,134 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(matrix["by_boundary_type"]["fallback_branch"]["missed_by_model"], 1)
         self.assertEqual(matrix["matched_findings"][0]["match_type"], "same_check_line_window")
 
+    def test_one_model_finding_cannot_match_two_static_findings(self):
+        static_scan = {
+            "findings": [
+                {
+                    "check_id": "C03",
+                    "file": "src/service.py",
+                    "line": 10,
+                    "boundary_type": "exception_handler",
+                    "semantic_fingerprint": "same-signal",
+                },
+                {
+                    "check_id": "C03",
+                    "file": "src/service.py",
+                    "line": 11,
+                    "boundary_type": "exception_handler",
+                    "semantic_fingerprint": "same-signal",
+                },
+            ]
+        }
+        model_scan = {
+            "findings": [
+                {
+                    "check_id": "C03",
+                    "file": "src/service.py",
+                    "line": 10,
+                    "boundary_type": "exception_handler",
+                    "semantic_fingerprint": "same-signal",
+                }
+            ]
+        }
+
+        matrix = build_suppression_matrix(static_scan, model_scan)
+
+        self.assertEqual(matrix["summary"]["matched_by_model"], 1)
+        self.assertEqual(matrix["summary"]["missed_by_model"], 1)
+        self.assertLessEqual(
+            matrix["summary"]["matched_by_model"],
+            matrix["summary"]["model_findings"],
+        )
+        self.assertTrue(matrix["invariants"]["one_to_one_model_matching"])
+
+    def test_identical_basenames_in_different_directories_do_not_match(self):
+        static_scan = {
+            "findings": [
+                {
+                    "check_id": "C03",
+                    "file": "src/a/index.py",
+                    "line": 20,
+                    "boundary_type": "exception_handler",
+                    "semantic_fingerprint": "static-signal",
+                }
+            ]
+        }
+        model_scan = {
+            "findings": [
+                {
+                    "check_id": "C03",
+                    "file": "src/b/index.py",
+                    "line": 20,
+                    "boundary_type": "exception_handler",
+                    "semantic_fingerprint": "model-signal",
+                }
+            ]
+        }
+
+        matrix = build_suppression_matrix(static_scan, model_scan)
+
+        self.assertEqual(matrix["summary"]["matched_by_model"], 0)
+        self.assertEqual(matrix["summary"]["missed_by_model"], 1)
+        self.assertEqual(matrix["summary"]["model_only_findings"], 1)
+
+    def test_semantic_fingerprint_requires_same_artifact(self):
+        static_scan = {
+            "findings": [
+                {
+                    "check_id": "C03",
+                    "file": "src/first.py",
+                    "line": 8,
+                    "boundary_type": "exception_handler",
+                    "semantic_fingerprint": "shared-semantic-fingerprint",
+                }
+            ]
+        }
+        model_scan = {
+            "findings": [
+                {
+                    "check_id": "C03",
+                    "file": "src/second.py",
+                    "line": 8,
+                    "boundary_type": "exception_handler",
+                    "semantic_fingerprint": "shared-semantic-fingerprint",
+                }
+            ]
+        }
+
+        matrix = build_suppression_matrix(static_scan, model_scan)
+
+        self.assertEqual(matrix["summary"]["matched_by_model"], 0)
+        self.assertEqual(matrix["summary"]["missed_by_model"], 1)
+
+    def test_noncanonical_artifact_paths_are_never_matched(self):
+        static_scan = {
+            "findings": [
+                {
+                    "check_id": "C03",
+                    "file": "../outside.py",
+                    "line": 8,
+                    "boundary_type": "exception_handler",
+                    "semantic_fingerprint": "shared-semantic-fingerprint",
+                }
+            ]
+        }
+        model_scan = {
+            "findings": [
+                {
+                    "check_id": "C03",
+                    "file": "../outside.py",
+                    "line": 8,
+                    "boundary_type": "exception_handler",
+                    "semantic_fingerprint": "shared-semantic-fingerprint",
+                }
+            ]
+        }
+
+        matrix = build_suppression_matrix(static_scan, model_scan)
+
+        self.assertEqual(matrix["summary"]["matched_by_model"], 0)
+
     def test_load_scan_accepts_standard_aira_json_wrapper(self):
         payload = {
             "aira_scan": {

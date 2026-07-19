@@ -119,17 +119,26 @@ class CollectorTests(unittest.TestCase):
                         return_value={"backend": "supabase", "id": "row123", "duplicate": False},
                     ) as submit_mock:
                         with mock.patch("aira.collector.submit_sample_manifest", return_value=True) as manifest_mock:
+                            results_dir = Path(tmpdir) / "results"
                             summary = collect_public_repos(
                                 manifest_path,
                                 submit_research_aggregate_flag=True,
                                 checkout_root=checkout_dir,
+                                results_dir=results_dir,
                             )
+                            result_file = results_dir / "github_openai_openai-python--abc123.json"
+                            result_file_exists = result_file.exists()
+                            result_file_text = result_file.read_text(encoding="utf-8")
 
         self.assertTrue(summary["ok"])
         self.assertEqual(summary["samples"][0]["sample_name"], "github:openai/openai-python")
         self.assertEqual(summary["samples"][0]["sample_version"], "abc123")
         self.assertEqual(summary["samples"][0]["research_submission_id"], "row123")
         self.assertTrue(summary["samples"][0]["manifest_written"])
+        self.assertEqual(summary["samples"][0]["engine"], "static")
+        self.assertTrue(summary["samples"][0]["result_path"].endswith("github_openai_openai-python--abc123.json"))
+        self.assertTrue(result_file_exists)
+        self.assertIn('"aira_scan"', result_file_text)
         submit_mock.assert_called_once()
         _, kwargs = submit_mock.call_args
         self.assertEqual(kwargs["source"], "github:openai/openai-python")
@@ -148,8 +157,8 @@ class CollectorTests(unittest.TestCase):
         }
         stdout = io.StringIO()
         stderr = io.StringIO()
-        with mock.patch("aira.cli.collect_public_repos", return_value=summary):
-            with mock.patch("sys.argv", ["aira", "collect", "manifest.yaml", "--output", "json"]):
+        with mock.patch("aira.cli.collect_public_repos", return_value=summary) as collect_mock:
+            with mock.patch("sys.argv", ["aira", "collect", "manifest.yaml", "--output", "json", "--results-dir", "results"]):
                 with redirect_stdout(stdout), redirect_stderr(stderr):
                     with self.assertRaises(SystemExit) as exit_ctx:
                         main()
@@ -157,6 +166,7 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(exit_ctx.exception.code, 0)
         payload = json.loads(stdout.getvalue())
         self.assertTrue(payload["ok"])
+        self.assertEqual(collect_mock.call_args.kwargs["results_dir"], "results")
 
 
 if __name__ == "__main__":

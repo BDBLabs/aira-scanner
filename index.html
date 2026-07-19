@@ -287,6 +287,7 @@ footer { position: relative; z-index: 1; border-top: 1px solid var(--border); pa
 .toast { position: fixed; bottom: 2rem; right: 2rem; background: var(--bg3); border: 1px solid var(--border2); color: var(--text); font-family: var(--mono); font-size: 0.78rem; padding: 0.7rem 1.2rem; border-radius: 6px; z-index: 999; opacity: 0; transform: translateY(8px); transition: all 0.3s; pointer-events: none; }
 .toast.show { opacity: 1; transform: translateY(0); }
 .toast.success { border-color: var(--green); color: var(--green); }
+.toast.warning { border-color: var(--amber); color: var(--amber); }
 </style>
 </head>
 <body>
@@ -939,12 +940,16 @@ async function callDeterministicOrBrowserFallback(code, lang, primaryMessage, br
     return await callDeterministicScanner({ code, lang, files });
   } catch (staticErr) {
     console.warn('Deterministic scan unavailable:', staticErr.message);
-    showToast('Server-side deterministic scan unavailable. Falling back to browser heuristics.', 'success');
+    showToast('Server-side deterministic scan unavailable. Browser heuristics are partial.', 'warning');
     return buildHeuristicResult(code, lang, {
       engine: 'heuristic',
       engine_label: 'Browser heuristic fallback',
-      note: browserFallbackNote || 'Server-side deterministic scan was unavailable, so this result comes from browser heuristics.'
-    });
+      note: browserFallbackNote || 'Server-side deterministic scan was unavailable, so this result comes from browser heuristics.',
+      scan_completeness: 'partial',
+      upstream_failure_reason: staticErr.message,
+      source_count: Array.isArray(files) && files.length > 0 ? files.length : 1,
+      capability: 'heuristic_partial'
+    }, files);
   }
 }
 
@@ -1059,27 +1064,71 @@ function summarizeFindings(findings) {
   return summary;
 }
 
-function buildHeuristicResult(code, lang, meta) {
+function buildHeuristicResult(code, lang, meta, files = null) {
+  if (Array.isArray(files) && files.length > 0) {
+    const aggregate = {
+      checks: Object.fromEntries(Object.keys(CHECK_LABELS).map(key => [key, 'UNKNOWN'])),
+      findings: [],
+      summary: {
+        high: 0,
+        medium: 0,
+        low: 0,
+        total: 0,
+        files_discovered: files.length,
+        files_scanned: 0,
+        files_analyzed: 0,
+        files_partial: files.length,
+        files_failed: 0,
+        files_omitted: 0,
+        scan_completeness: 'partial'
+      },
+      meta: {
+        ...meta,
+        scan_completeness: 'partial',
+        artifact_manifest: files.map(file => ({
+          path: String(file?.path || ''),
+          status: 'partial',
+          capability: 'browser_heuristic'
+        }))
+      }
+    };
+    files.forEach(file => {
+      const fileResult = buildHeuristicResult(String(file?.code || ''), file?.lang || lang, {
+        ...meta,
+        source_path: String(file?.path || '')
+      });
+      Object.entries(fileResult.checks).forEach(([key, status]) => {
+        if (status === 'FAIL') aggregate.checks[key] = 'FAIL';
+      });
+      aggregate.findings.push(...fileResult.findings.map(finding => ({
+        ...finding,
+        file: String(file?.path || '')
+      })));
+    });
+    Object.assign(aggregate.summary, summarizeFindings(aggregate.findings));
+    return aggregate;
+  }
+
   const lines = code.split(/\r?\n/);
   const result = {
     checks: Object.fromEntries(Object.keys(CHECK_LABELS).map(key => [key, 'UNKNOWN'])),
     findings: [],
-    summary: { high: 0, medium: 0, low: 0, total: 0 },
-    meta
+    summary: {
+      high: 0,
+      medium: 0,
+      low: 0,
+      total: 0,
+      files_discovered: 1,
+      files_scanned: 0,
+      files_analyzed: 0,
+      files_partial: 1,
+      files_failed: 0,
+      files_omitted: 0,
+      scan_completeness: 'partial'
+    },
+    meta: { ...meta, scan_completeness: 'partial', capability: 'heuristic_partial' }
   };
-  const evaluated = new Set([
-    'success_integrity',
-    'audit_integrity',
-    'exception_handling',
-    'fallback_control',
-    'bypass_controls',
-    'return_contracts',
-    'background_tasks',
-    'environment_safety',
-    'startup_integrity',
-    'determinism',
-    'idempotency_safety'
-  ]);
+  const evaluated = new Set();
   const seen = new Set();
 
   const addFinding = (key, severity, line, description, snippet = '') => {
@@ -1091,6 +1140,7 @@ function buildHeuristicResult(code, lang, meta) {
       check_id: CHECK_LABELS[key].id,
       check_name: CHECK_NAME_LOOKUP[key],
       severity,
+      file: meta?.source_path ? String(meta.source_path) : '',
       line,
       description,
       snippet
@@ -1099,9 +1149,6 @@ function buildHeuristicResult(code, lang, meta) {
 
   const setPassIfChecked = key => {
     evaluated.add(key);
-    if (!HUMAN_REVIEW_KEYS.has(key) && result.checks[key] === 'UNKNOWN') {
-      result.checks[key] = 'PASS';
-    }
   };
 
   const lineWindow = (start, size = 6) => lines.slice(start, start + size).join('\n');
@@ -1301,27 +1348,10 @@ function buildHeuristicResult(code, lang, meta) {
     setPassIfChecked('determinism');
   }
 
-  [
-    'success_integrity',
-    'audit_integrity',
-    'exception_handling',
-    'fallback_control',
-    'bypass_controls',
-    'return_contracts',
-    'background_tasks',
-    'environment_safety',
-    'startup_integrity',
-    'determinism',
-    'idempotency_safety'
-  ].forEach(key => {
-    if (evaluated.has(key) && result.checks[key] === 'UNKNOWN') {
-      result.checks[key] = 'PASS';
-    }
-  });
-
   result.checks.logic_consistency = 'UNKNOWN';
   result.checks.lineage = 'UNKNOWN';
-  result.summary = summarizeFindings(result.findings);
+  Object.assign(result.summary, summarizeFindings(result.findings));
+  result.meta.evaluated_heuristics = Array.from(evaluated).sort();
   return result;
 }
 

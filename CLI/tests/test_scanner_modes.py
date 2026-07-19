@@ -40,7 +40,11 @@ class ScannerModeTests(unittest.TestCase):
 
             result = AIRAScanner(str(target)).scan(mode="static")
 
-        self.assertEqual(result.files_scanned, 1)
+        self.assertEqual(result.files_scanned, 0)
+        self.assertEqual(result.summary["files_analyzed"], 0)
+        self.assertEqual(result.summary["files_failed"], 1)
+        self.assertEqual(result.summary["checks_passed"], 0)
+        self.assertEqual(result.summary["checks_unknown"], 15)
         self.assertEqual(result.findings[0]["check_id"], "SCANNER")
         self.assertEqual(result.findings[0]["severity"], "HIGH")
         self.assertIn("Could not parse Python file", result.findings[0]["description"])
@@ -208,7 +212,7 @@ class ScannerModeTests(unittest.TestCase):
 
         self.assertEqual(result.findings[0]["check_id"], "C05")
         self.assertEqual(result.findings[0]["line"], 0)
-        self.assertEqual(result.check_results["success_integrity"], "PASS")
+        self.assertEqual(result.check_results["success_integrity"], "UNKNOWN")
 
     def test_llm_mode_drops_human_review_only_findings(self):
         with tempfile.TemporaryDirectory() as tmpdir:

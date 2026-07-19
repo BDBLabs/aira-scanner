@@ -37,6 +37,7 @@ class JSChecker:
         self.filepath = filepath
         self.source = Path(filepath).read_text(encoding="utf-8", errors="replace")
         self.lines = self.source.splitlines()
+        self.code_lines = self._strip_comments_strings_and_regexes(self.source).splitlines()
         self.findings: List[Finding] = []
         self._seen = set()
         self.tree = None
@@ -53,6 +54,85 @@ class JSChecker:
                     self.tree = None
                     self.parse_ok = False
 
+    @staticmethod
+    def _strip_comments_strings_and_regexes(source: str) -> str:
+        """Blank lexical literals while preserving newlines and executable identifiers."""
+        result = []
+        index = 0
+        length = len(source)
+        block_comment = False
+        while index < length:
+            char = source[index]
+            next_char = source[index + 1] if index + 1 < length else ""
+            if block_comment:
+                if char == "*" and next_char == "/":
+                    result.extend((" ", " "))
+                    index += 2
+                    block_comment = False
+                else:
+                    result.append("\n" if char == "\n" else " ")
+                    index += 1
+                continue
+            if char == "/" and next_char == "/":
+                while index < length and source[index] != "\n":
+                    result.append(" ")
+                    index += 1
+                continue
+            if char == "/" and next_char == "*":
+                result.extend((" ", " "))
+                index += 2
+                block_comment = True
+                continue
+            if char in {"'", '"', "`"}:
+                quote = char
+                result.append(" ")
+                index += 1
+                while index < length:
+                    current = source[index]
+                    result.append("\n" if current == "\n" else " ")
+                    index += 1
+                    if current == "\\" and index < length:
+                        escaped = source[index]
+                        result.append("\n" if escaped == "\n" else " ")
+                        index += 1
+                        continue
+                    if current == quote:
+                        break
+                continue
+            if char == "/":
+                previous = next((item for item in reversed(result) if not item.isspace()), "")
+                if previous in {"", "=", "(", ":", ",", "!", "[", "{", ";"}:
+                    result.append(" ")
+                    index += 1
+                    in_class = False
+                    while index < length:
+                        current = source[index]
+                        result.append("\n" if current == "\n" else " ")
+                        index += 1
+                        if current == "\\" and index < length:
+                            escaped = source[index]
+                            result.append("\n" if escaped == "\n" else " ")
+                            index += 1
+                            continue
+                        if current == "[":
+                            in_class = True
+                        elif current == "]":
+                            in_class = False
+                        elif current == "/" and not in_class:
+                            while index < length and source[index].isalpha():
+                                result.append(" ")
+                                index += 1
+                            break
+                    continue
+            result.append(char)
+            index += 1
+        return "".join(result)
+
+    def _code_window(self, lineno: int, before: int = 3, after: int = 8) -> str:
+        start = max(0, lineno - 1 - before)
+        end = min(len(self.code_lines), lineno + after)
+        return "\n".join(self.code_lines[start:end])
+
     def run(self) -> List[Finding]:
         if self.parse_ok:
             self._check_broad_exception_suppression_ast()
@@ -61,7 +141,8 @@ class JSChecker:
             self._check_ambiguous_returns_ast()
             self._check_startup_integrity_ast()
         self._check_broad_exception_suppression()
-        self._check_success_integrity()
+        if not self.parse_ok:
+            self._check_success_integrity()
         self._check_background_tasks()
         self._check_bypass_paths()
         self._check_environment_safety()
@@ -137,13 +218,28 @@ class JSChecker:
                 if getattr(argument, "type", None) == "Literal" and argument.value is True:
                     return True
                 if getattr(argument, "type", None) == "ObjectExpression":
+                    pairs = []
                     for prop in getattr(argument, "properties", []):
                         key = getattr(getattr(prop, "key", None), "name", None)
                         if key is None and hasattr(getattr(prop, "key", None), "value"):
                             key = str(prop.key.value)
                         value = getattr(prop, "value", None)
-                        if str(key).lower() in {"success", "status", "ok", "result"} and getattr(value, "value", None) is True:
-                            return True
+                        pairs.append((str(key).lower(), getattr(value, "value", None)))
+                    if any(
+                        (key in {"success", "ok"} and value is False)
+                        or (key == "status" and str(value).lower() in {"error", "failed", "failure", "invalid"})
+                        for key, value in pairs
+                    ):
+                        continue
+                    if any(
+                        (key in {"success", "ok"} and value is True)
+                        or (
+                            key == "status"
+                            and str(value).lower() in {"ok", "success", "succeeded", "complete", "completed", "ready"}
+                        )
+                        for key, value in pairs
+                    ):
+                        return True
             if child_type == "CallExpression":
                 callee_name = self._member_name(getattr(child, "callee", None))
                 if callee_name.endswith("resolve"):
@@ -349,14 +445,13 @@ class JSChecker:
         patterns = [
             r'setTimeout\s*\(',
             r'setInterval\s*\(',
-            r'(?:Promise\.all|Promise\.allSettled|Promise\.race)\s*\(',
             r'new\s+Worker\s*\(',
             r'\.then\s*\([^)]*\)\s*(?:;|$)',  # .then() without .catch()
         ]
-        for i, line in enumerate(self.lines, start=1):
+        for i, line in enumerate(self.code_lines, start=1):
             for pattern in patterns:
                 if re.search(pattern, line):
-                    window = self._window(i)
+                    window = self._code_window(i)
                     # Flag if no .catch() or try/catch in vicinity
                     if not re.search(r'\.catch\s*\(|try\s*\{', window):
                         self._add("C08", "UNSUPERVISED BACKGROUND TASKS", "MEDIUM",
@@ -371,7 +466,7 @@ class JSChecker:
             r'\bskipAudit\b', r'\bdisableChecks\b', r'\bforcePass\b',
             r'\btesting_bypass\b', r'\bskip_validation\b'
         ]
-        for i, line in enumerate(self.lines, start=1):
+        for i, line in enumerate(self.code_lines, start=1):
             for pattern in bypass_patterns:
                 if re.search(pattern, line, re.IGNORECASE):
                     self._add("C05", "BYPASS / OVERRIDE PATHS", "HIGH",
@@ -380,11 +475,11 @@ class JSChecker:
     # ── CHECK 9: Environment-Dependent Safety ─────────────────────
     def _check_environment_safety(self):
         patterns = [
-            r'process\.env\.NODE_ENV\s*[!=]==?\s*["\'](?:development|dev|test|staging)',
+            r'process\.env\.NODE_ENV\s*[!=]==?',
             r'if\s*\(\s*(?:isDev|isTest|isStaging|debugMode)\b',
             r'(?:skip|disable|bypass)\w*\s*[=:]\s*(?:true|process\.env)',
         ]
-        for i, line in enumerate(self.lines, start=1):
+        for i, line in enumerate(self.code_lines, start=1):
             for pattern in patterns:
                 if re.search(pattern, line, re.IGNORECASE):
                     self._add("C09", "ENVIRONMENT-DEPENDENT SAFETY", "HIGH",
@@ -396,7 +491,7 @@ class JSChecker:
             r'\btemperature\s*[:=]\s*(?:0?\.\d*[1-9]\d*|[1-9]\d*(?:\.\d+)?)',
             r'"temperature"\s*:\s*(?:0?\.\d*[1-9]\d*|[1-9]\d*(?:\.\d+)?)',
         ]
-        for i, line in enumerate(self.lines, start=1):
+        for i, line in enumerate(self.code_lines, start=1):
             for pattern in patterns:
                 if re.search(pattern, line):
                     self._add("C11", "DETERMINISTIC REASONING DRIFT", "HIGH",
@@ -407,13 +502,13 @@ class JSChecker:
         result_fn_pattern = r'(?:function|const|let|var)\s+(\w*(?:predict|assess|evaluate|score|classify|recommend|decide|infer|generate|resolve)\w*)\s*[=(]'
         confidence_terms = r'(?:confidence|isConfident|certainty|isVerified|probability|isCached|isDefault|isEstimated)'
 
-        for i, line in enumerate(self.lines, start=1):
+        for i, line in enumerate(self.code_lines, start=1):
             match = re.search(result_fn_pattern, line, re.IGNORECASE)
             if match:
                 fn_name = match.group(1)
                 # Look at next 30 lines for confidence metadata
-                window_end = min(len(self.lines), i + 30)
-                fn_body = "\n".join(self.lines[i:window_end])
+                window_end = min(len(self.code_lines), i + 30)
+                fn_body = "\n".join(self.code_lines[i:window_end])
                 if not re.search(confidence_terms, fn_body, re.IGNORECASE):
                     self._add("C13", "CONFIDENCE MISREPRESENTATION", "MEDIUM",
                               i, f"Function '{fn_name}' appears to return results without confidence metadata")
@@ -424,11 +519,11 @@ class JSChecker:
         write_patterns = [r'\b(?:insert|create|write|commit|publish|send|post|charge|submit)\b']
         idempotency_patterns = [r'\bidempotency[_-]?[Kk]ey\b', r'\bidempotent\b', r'\bdedup\b']
 
-        for i, line in enumerate(self.lines, start=1):
+        for i, line in enumerate(self.code_lines, start=1):
             is_retry = any(re.search(p, line, re.IGNORECASE) for p in retry_patterns)
             if not is_retry:
                 continue
-            window = self._window(i, before=3, after=12)
+            window = self._code_window(i, before=3, after=12)
             has_write = any(re.search(p, window, re.IGNORECASE) for p in write_patterns)
             has_idem = any(re.search(p, window, re.IGNORECASE) for p in idempotency_patterns)
             if has_write and not has_idem:
@@ -438,7 +533,7 @@ class JSChecker:
     # ── CHECK 4: Fallback Scatter ─────────────────────────────────
     def _check_fallback_scatter(self):
         patterns = [r'\bfallback\b', r'\bdegraded\b', r'\bbestEffort\b', r'\bbest_effort\b']
-        for i, line in enumerate(self.lines, start=1):
+        for i, line in enumerate(self.code_lines, start=1):
             for pattern in patterns:
                 if re.search(pattern, line, re.IGNORECASE):
                     self._add("C04", "DISTRIBUTED FALLBACK / DEGRADED EXECUTION", "LOW",

@@ -10,11 +10,15 @@ that nearby-but-different findings are identical.
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from aira.scanner import CHECKS
+
+
+COMPARISON_VERSION = "aira-comparison-v2"
 
 
 def _read_json_or_jsonl(path: Path) -> Dict[str, Any]:
@@ -54,20 +58,23 @@ def _checks(scan: Dict[str, Any]) -> Dict[str, str]:
 
 
 def _file_key(value: Any) -> str:
-    raw = str(value or "").replace("\\", "/")
-    return raw.strip()
-
-
-def _file_basename(value: Any) -> str:
-    return Path(_file_key(value)).name
+    """Return a canonical repository-relative artifact identity or an empty key."""
+    raw = str(value or "").strip().replace("\\", "/")
+    if not raw or re.match(r"^[A-Za-z]:/", raw):
+        return ""
+    path = PurePosixPath(raw)
+    if path.is_absolute() or ".." in path.parts:
+        return ""
+    parts = [part for part in path.parts if part not in {"", "."}]
+    if not parts:
+        return ""
+    return PurePosixPath(*parts).as_posix()
 
 
 def _same_file(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
     left_file = _file_key(left.get("file"))
     right_file = _file_key(right.get("file"))
-    if left_file and right_file and left_file == right_file:
-        return True
-    return bool(_file_basename(left_file) and _file_basename(left_file) == _file_basename(right_file))
+    return bool(left_file and right_file and left_file == right_file)
 
 
 def _line(value: Dict[str, Any]) -> int:
@@ -99,23 +106,32 @@ def _match_static_finding(
     *,
     line_window: int,
 ) -> Tuple[Optional[int], str]:
-    semantic = static_finding.get("semantic_fingerprint")
-    if semantic:
-        for index, model_finding in model_findings:
-            if semantic == model_finding.get("semantic_fingerprint"):
-                return index, "semantic_fingerprint"
-
     same_file_candidates = [
         (index, model_finding)
         for index, model_finding in model_findings
         if _same_file(static_finding, model_finding)
     ]
-    for index, model_finding in same_file_candidates:
+    semantic = static_finding.get("semantic_fingerprint")
+    if semantic:
+        for index, model_finding in same_file_candidates:
+            if semantic == model_finding.get("semantic_fingerprint"):
+                return index, "semantic_fingerprint"
+
+    nearest_candidates = sorted(
+        same_file_candidates,
+        key=lambda item: (
+            _line_distance(static_finding, item[1])
+            if _line_distance(static_finding, item[1]) is not None
+            else float("inf"),
+            item[0],
+        ),
+    )
+    for index, model_finding in nearest_candidates:
         distance = _line_distance(static_finding, model_finding)
         if distance is not None and distance <= line_window and _same_check(static_finding, model_finding):
             return index, "same_check_line_window"
 
-    for index, model_finding in same_file_candidates:
+    for index, model_finding in nearest_candidates:
         distance = _line_distance(static_finding, model_finding)
         if distance is not None and distance <= line_window and _same_boundary(static_finding, model_finding):
             return index, "same_boundary_line_window"
@@ -131,6 +147,7 @@ def _compact_finding(finding: Dict[str, Any]) -> Dict[str, Any]:
         "line": finding.get("line"),
         "boundary_type": finding.get("boundary_type", "unknown"),
         "fingerprint": finding.get("fingerprint", ""),
+        "fingerprint_version": finding.get("fingerprint_version", ""),
         "description": finding.get("description", ""),
     }
 
@@ -175,7 +192,15 @@ def build_suppression_matrix(
         boundary_type = str(finding.get("boundary_type") or "unknown")
         by_check[check_id]["static_findings"] += 1
         by_boundary[boundary_type]["static_findings"] += 1
-        match_index, match_type = _match_static_finding(finding, indexed_model_findings, line_window=line_window)
+        available_model_findings = [
+            item for item in indexed_model_findings
+            if item[0] not in used_model_indexes
+        ]
+        match_index, match_type = _match_static_finding(
+            finding,
+            available_model_findings,
+            line_window=line_window,
+        )
         if match_index is None:
             by_check[check_id]["missed_by_model"] += 1
             by_boundary[boundary_type]["missed_by_model"] += 1
@@ -220,6 +245,7 @@ def build_suppression_matrix(
         })
 
     summary = {
+        "comparison_version": COMPARISON_VERSION,
         "line_window": line_window,
         "static_findings": len(static_findings),
         "model_findings": len(model_findings),
@@ -229,8 +255,17 @@ def build_suppression_matrix(
         "model_only_findings": len(model_only_findings),
         **dict(status_counts),
     }
+    invariants = {
+        "one_to_one_model_matching": len(matched_findings) <= len(model_findings),
+        "static_partition_complete": len(matched_findings) + len(missed_findings) == len(static_findings),
+        "model_partition_complete": len(matched_findings) + len(model_only_findings) == len(model_findings),
+    }
+    if not all(invariants.values()):
+        raise AssertionError(f"Comparison invariant violation: {invariants}")
     return {
+        "comparison_version": COMPARISON_VERSION,
         "summary": summary,
+        "invariants": invariants,
         "check_status_matrix": check_status_matrix,
         "by_check": {key: dict(value) for key, value in sorted(by_check.items())},
         "by_boundary_type": {key: dict(value) for key, value in sorted(by_boundary.items())},

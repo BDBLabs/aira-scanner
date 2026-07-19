@@ -15,7 +15,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
@@ -162,22 +162,55 @@ class ScanResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-def _default_check_results(files_scanned: int) -> Dict[str, str]:
+def _default_check_results(files_scanned: int, *, coverage_complete: Optional[bool] = None) -> Dict[str, str]:
+    if coverage_complete is None:
+        coverage_complete = files_scanned > 0
     results: Dict[str, str] = {}
     for check_id, (key, _) in CHECKS.items():
-        if files_scanned == 0 or check_id in {"C07", "C12"}:
+        if not coverage_complete or check_id in {"C07", "C12"}:
             results[key] = "UNKNOWN"
         else:
             results[key] = "PASS"
     return results
 
 
-def _summarize(findings: List[Dict[str, Any]], check_results: Dict[str, str], files_scanned: int) -> Dict[str, Any]:
+def _artifact_counts(files_scanned: int, values: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    supplied = values or {}
+    discovered = int(supplied.get("files_discovered", files_scanned) or 0)
+    analyzed = int(supplied.get("files_analyzed", files_scanned) or 0)
+    partial = int(supplied.get("files_partial", 0) or 0)
+    failed = int(supplied.get("files_failed", 0) or 0)
+    omitted = int(supplied.get("files_omitted", 0) or 0)
+    if discovered <= 0:
+        completeness = "unavailable"
+    elif analyzed == discovered and partial == 0 and failed == 0 and omitted == 0:
+        completeness = "complete"
+    elif analyzed == 0 and partial == 0 and failed + omitted >= discovered:
+        completeness = "failed"
+    else:
+        completeness = "partial"
+    return {
+        "files_discovered": discovered,
+        "files_analyzed": analyzed,
+        "files_partial": partial,
+        "files_failed": failed,
+        "files_omitted": omitted,
+        "scan_completeness": completeness,
+    }
+
+
+def _summarize(
+    findings: List[Dict[str, Any]],
+    check_results: Dict[str, str],
+    files_scanned: int,
+    artifact_counts: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     high = sum(1 for finding in findings if finding.get("severity") == "HIGH")
     medium = sum(1 for finding in findings if finding.get("severity") == "MEDIUM")
     low = sum(1 for finding in findings if finding.get("severity") == "LOW")
     return {
         "files_scanned": files_scanned,
+        **_artifact_counts(files_scanned, artifact_counts),
         "findings_total": len(findings),
         "by_severity": {
             "HIGH": high,
@@ -208,6 +241,7 @@ def _normalize_findings(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "boundary_type",
             "context",
             "evidence",
+            "fingerprint_version",
             "fingerprint",
             "semantic_fingerprint",
             "location_fingerprint",
@@ -231,10 +265,16 @@ def _build_result(
     findings: List[Dict[str, Any]],
     check_results: Optional[Dict[str, str]] = None,
     metadata: Optional[Dict[str, Any]] = None,
+    artifact_counts: Optional[Dict[str, Any]] = None,
 ) -> ScanResult:
     normalized_findings = _normalize_findings(findings)
     final_check_results = check_results or _default_check_results(files_scanned)
-    summary = _summarize(normalized_findings, final_check_results, files_scanned)
+    summary = _summarize(
+        normalized_findings,
+        final_check_results,
+        files_scanned,
+        artifact_counts=artifact_counts,
+    )
     return ScanResult(
         target=str(target),
         scanned_at=datetime.now(timezone.utc).isoformat(),
@@ -275,12 +315,38 @@ def merge_scan_results(primary: ScanResult, secondary: ScanResult, mode: str) ->
         "mode": mode,
         "sources": [primary.metadata, secondary.metadata],
     }
+    discovered = max(
+        int(primary.summary.get("files_discovered", primary.files_scanned)),
+        int(secondary.summary.get("files_discovered", secondary.files_scanned)),
+    )
+    analyzed = max(
+        int(primary.summary.get("files_analyzed", primary.files_scanned)),
+        int(secondary.summary.get("files_analyzed", secondary.files_scanned)),
+    )
+    fully_analyzed = discovered > 0 and analyzed >= discovered
+    merged_artifact_counts = {
+        "files_discovered": discovered,
+        "files_analyzed": min(analyzed, discovered),
+        "files_partial": 0 if fully_analyzed else max(
+            int(primary.summary.get("files_partial", 0)),
+            int(secondary.summary.get("files_partial", 0)),
+        ),
+        "files_failed": 0 if fully_analyzed else max(
+            int(primary.summary.get("files_failed", 0)),
+            int(secondary.summary.get("files_failed", 0)),
+        ),
+        "files_omitted": 0 if fully_analyzed else max(
+            int(primary.summary.get("files_omitted", 0)),
+            int(secondary.summary.get("files_omitted", 0)),
+        ),
+    }
     return _build_result(
         Path(primary.target),
         max(primary.files_scanned, secondary.files_scanned),
         list(deduped.values()),
         check_results=merged_checks,
         metadata=metadata,
+        artifact_counts=merged_artifact_counts,
     )
 
 
@@ -319,14 +385,14 @@ class AIRAScanner:
 
     def _scan_static(self) -> ScanResult:
         findings: List[Dict[str, Any]] = []
-        files_scanned = 0
-
         files = self._files_to_scan()
+        artifacts: List[Dict[str, Any]] = []
         for filepath in files:
-            file_findings, scanned = self._scan_static_file(filepath)
+            file_findings, artifact = self._scan_static_file(filepath)
             findings.extend(file_findings)
-            files_scanned += scanned
+            artifacts.append(artifact)
 
+        capability_gaps: Dict[str, List[str]] = {}
         if self.target.is_dir():
             _, test_findings = scan_test_files(str(self.target), is_excluded=self._is_excluded_path)
             for finding in test_findings:
@@ -334,30 +400,66 @@ class AIRAScanner:
                 if normalized.get("file"):
                     normalized["file"] = self._display_path(Path(normalized["file"]))
                 findings.append(self._enrich_display_finding(normalized))
+            test_analysis_failures = sorted({
+                self._display_path(Path(str(finding.get("file"))))
+                for finding in test_findings
+                if finding.get("check_id") == "SCANNER" and finding.get("file")
+            })
+            if test_analysis_failures:
+                capability_gaps["test_coverage_symmetry"] = test_analysis_failures
 
         failed_checks = {finding["check_id"] for finding in findings if str(finding.get("check_id", "")).startswith("C")}
-        check_results = _default_check_results(files_scanned)
+        status_counts = {
+            status: sum(1 for artifact in artifacts if artifact.get("status") == status)
+            for status in ("analyzed", "partial", "failed", "omitted")
+        }
+        files_discovered = len(files)
+        coverage_complete = status_counts["analyzed"] == files_discovered
+        check_results = _default_check_results(
+            files_discovered,
+            coverage_complete=coverage_complete,
+        )
         for check_id, (key, _) in CHECKS.items():
             if check_id in failed_checks:
                 check_results[key] = "FAIL"
+        for check_key in capability_gaps:
+            if check_results.get(check_key) != "FAIL":
+                check_results[check_key] = "UNKNOWN"
 
         return _build_result(
             self.target,
-            files_scanned,
+            status_counts["analyzed"],
             findings,
             check_results=check_results,
-            metadata={"mode": "static", "engine": "static"},
+            metadata={
+                "mode": "static",
+                "engine": "static",
+                "artifacts": artifacts,
+                "capability_gaps": capability_gaps,
+            },
+            artifact_counts={
+                "files_discovered": files_discovered,
+                "files_analyzed": status_counts["analyzed"],
+                "files_partial": status_counts["partial"],
+                "files_failed": status_counts["failed"],
+                "files_omitted": status_counts["omitted"],
+            },
         )
 
-    def _scan_static_file(self, filepath: Path) -> Tuple[List[Dict[str, Any]], int]:
+    def _scan_static_file(self, filepath: Path) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         ext = filepath.suffix.lower()
         lang = SUPPORTED_EXTENSIONS.get(ext)
+        display_path = self._display_path(filepath)
         if not lang:
-            return [], 0
+            return [], {
+                "path": display_path,
+                "language": "unsupported",
+                "status": "omitted",
+                "parser": "unsupported",
+            }
 
         try:
             checker = PythonChecker(str(filepath)) if lang == "python" else JSChecker(str(filepath))
-            display_path = self._display_path(filepath)
             findings = [
                 enrich_finding(
                     {
@@ -375,11 +477,39 @@ class AIRAScanner:
                 )
                 for item in checker.run()
             ]
-            return findings, 1
+            if lang == "python":
+                status = "analyzed" if checker.parse_ok else "failed"
+                parser = "python_ast" if checker.parse_ok else "python_ast_failed"
+                reason = "" if checker.parse_ok else str(checker.parse_error or "Python parser failure")
+            else:
+                status = "analyzed" if checker.parse_ok else "partial"
+                parser = "esprima" if checker.parse_ok else "lexical_fallback"
+                reason = "" if checker.parse_ok else "JavaScript/TypeScript parser unavailable or unsupported syntax"
+            artifact = {
+                "path": display_path,
+                "language": lang,
+                "status": status,
+                "parser": parser,
+            }
+            if reason:
+                artifact["reason"] = reason
+            return findings, artifact
         except OSError as exc:
-            return [self._scanner_error_finding(filepath, f"Unable to read file: {exc}")], 1
+            return [self._scanner_error_finding(filepath, f"Unable to read file: {exc}")], {
+                "path": display_path,
+                "language": lang,
+                "status": "failed",
+                "parser": "unavailable",
+                "reason": f"Unable to read file: {exc}",
+            }
         except Exception as exc:
-            return [self._scanner_error_finding(filepath, f"Scanner failed on file: {exc}")], 1
+            return [self._scanner_error_finding(filepath, f"Scanner failed on file: {exc}")], {
+                "path": display_path,
+                "language": lang,
+                "status": "failed",
+                "parser": "failed",
+                "reason": f"Scanner failed on file: {exc}",
+            }
 
     def _scanner_error_finding(self, filepath: Path, description: str, line: int = 0) -> Dict[str, Any]:
         return enrich_finding({
@@ -395,13 +525,48 @@ class AIRAScanner:
     def _source_path_for_display_path(self, display_path: str) -> Optional[Path]:
         if not display_path:
             return self.target if self.target.is_file() else None
-        candidate = Path(display_path)
-        if candidate.is_absolute():
-            return candidate if candidate.exists() else None
+        canonical = self._canonical_artifact_path(display_path)
+        if not canonical:
+            return None
+        candidate = Path(canonical)
         if self.target.is_file():
-            return self.target
-        resolved = self.target / candidate
-        return resolved if resolved.exists() else None
+            return self.target if canonical == self.target.name else None
+        root = self.target.resolve()
+        resolved = (root / candidate).resolve(strict=False)
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            return None
+        return resolved if resolved.is_file() else None
+
+    @staticmethod
+    def _canonical_artifact_path(value: Any) -> Optional[str]:
+        raw = str(value or "").strip().replace("\\", "/")
+        if not raw:
+            return ""
+        if PureWindowsPath(raw).is_absolute():
+            return None
+        candidate = PurePosixPath(raw)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            return None
+        parts = [part for part in candidate.parts if part not in {"", "."}]
+        if not parts:
+            return ""
+        return PurePosixPath(*parts).as_posix()
+
+    def _validated_model_artifact(
+        self,
+        value: Any,
+        allowed_artifacts: set,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        canonical = self._canonical_artifact_path(value)
+        if canonical is None:
+            return None, "noncanonical_artifact_path"
+        if not canonical:
+            return "", None
+        if canonical not in allowed_artifacts:
+            return None, "artifact_not_in_manifest"
+        return canonical, None
 
     def _enrich_display_finding(self, finding: Dict[str, Any]) -> Dict[str, Any]:
         source_path = self._source_path_for_display_path(str(finding.get("file") or ""))
@@ -486,20 +651,27 @@ class AIRAScanner:
         return sorted(files)
 
     def _scan_llm(self, llm_config: LLMConfig) -> ScanResult:
-        combined_source, files_scanned, truncated = self._build_llm_input(llm_config.max_context_chars)
+        combined_source, files_scanned, truncated, artifacts = self._build_llm_input(llm_config.max_context_chars)
         prompt = self._build_llm_prompt(combined_source)
         response = run_llm_json_audit(llm_config, LLM_SYSTEM_PROMPT, prompt)
-        result = self._normalize_llm_result(response, files_scanned, truncated, llm_config)
+        result = self._normalize_llm_result(
+            response,
+            files_scanned,
+            truncated,
+            llm_config,
+            artifacts=artifacts,
+        )
         return result
 
-    def _build_llm_input(self, max_context_chars: int) -> Tuple[str, int, bool]:
+    def _build_llm_input(self, max_context_chars: int) -> Tuple[str, int, bool, List[Dict[str, Any]]]:
         files = self._files_to_scan()
         sections: List[str] = []
+        artifacts: List[Dict[str, Any]] = []
         total_chars = 0
         truncated = False
         files_included = 0
 
-        for filepath in files:
+        for file_index, filepath in enumerate(files):
             rel_path = filepath.name if self.target.is_file() else str(filepath.relative_to(self.target))
             try:
                 content = filepath.read_text(encoding="utf-8", errors="replace")
@@ -510,6 +682,12 @@ class AIRAScanner:
                 sections.append(section)
                 total_chars += len(section)
                 files_included += 1
+                artifacts.append({
+                    "path": rel_path,
+                    "language": SUPPORTED_EXTENSIONS.get(filepath.suffix.lower(), "unknown"),
+                    "status": "analyzed",
+                    "parser": "llm_input",
+                })
                 continue
 
             remaining = max_context_chars - total_chars
@@ -517,10 +695,26 @@ class AIRAScanner:
                 snippet = section[:remaining]
                 sections.append(f"{snippet}\n[...truncated for size...]\n")
                 files_included += 1
+                artifacts.append({
+                    "path": rel_path,
+                    "language": SUPPORTED_EXTENSIONS.get(filepath.suffix.lower(), "unknown"),
+                    "status": "partial",
+                    "parser": "llm_input",
+                    "reason": "Input truncated by max_context_chars",
+                })
             truncated = True
+            for omitted_path in files[file_index + 1 if remaining > 0 else file_index:]:
+                omitted_rel_path = omitted_path.name if self.target.is_file() else str(omitted_path.relative_to(self.target))
+                artifacts.append({
+                    "path": omitted_rel_path,
+                    "language": SUPPORTED_EXTENSIONS.get(omitted_path.suffix.lower(), "unknown"),
+                    "status": "omitted",
+                    "parser": "llm_input",
+                    "reason": "Omitted after max_context_chars was exhausted",
+                })
             break
 
-        return "\n".join(sections), files_included, truncated
+        return "\n".join(sections), files_included, truncated, artifacts
 
     def _build_llm_prompt(self, combined_source: str) -> str:
         return f"""Analyze the following code snapshot with AIRA v{__version__}.
@@ -574,6 +768,8 @@ Code snapshot:
         files_scanned: int,
         truncated: bool,
         llm_config: LLMConfig,
+        *,
+        artifacts: Optional[List[Dict[str, Any]]] = None,
     ) -> ScanResult:
         try:
             raw = json.loads(response["text"])
@@ -585,15 +781,36 @@ Code snapshot:
         raw_checks = raw.get("ai_failure_audit") or {}
         if not isinstance(raw_checks, dict):
             raw_checks = {}
-        check_results = _default_check_results(files_scanned)
+        artifact_manifest = artifacts or []
+        files_discovered = len(artifact_manifest) or files_scanned
+        status_counts = {
+            status: sum(1 for artifact in artifact_manifest if artifact.get("status") == status)
+            for status in ("analyzed", "partial", "failed", "omitted")
+        }
+        coverage_complete = (
+            files_discovered > 0
+            and status_counts["analyzed"] == files_discovered
+            and not truncated
+        )
+        check_results = _default_check_results(files_scanned, coverage_complete=False)
         for _, (key, _) in CHECKS.items():
             value = raw_checks.get(key)
-            if value in {"PASS", "FAIL", "UNKNOWN"}:
+            if value == "FAIL":
+                check_results[key] = value
+            elif value == "PASS" and coverage_complete:
+                check_results[key] = value
+            elif value == "UNKNOWN":
                 check_results[key] = value
         check_results["logic_consistency"] = "UNKNOWN"
         check_results["lineage"] = "UNKNOWN"
 
         findings = []
+        rejected_findings = []
+        allowed_artifacts = {
+            str(artifact.get("path") or "")
+            for artifact in artifact_manifest
+            if artifact.get("status") in {"analyzed", "partial"}
+        }
         for item in raw.get("findings", []) if isinstance(raw.get("findings"), list) else []:
             if not isinstance(item, dict):
                 continue
@@ -601,21 +818,39 @@ Code snapshot:
             normalized_check_id = check_id or CHECK_ID_BY_KEY.get(item.get("check_key", ""), "C00")
             if normalized_check_id in {"C07", "C12"}:
                 continue
+            artifact, rejection_reason = self._validated_model_artifact(
+                item.get("file", ""),
+                allowed_artifacts,
+            )
+            if rejection_reason:
+                rejected_findings.append({
+                    "file": str(item.get("file") or ""),
+                    "check_id": str(normalized_check_id or ""),
+                    "reason": rejection_reason,
+                })
+                continue
             check_name = item.get("check_name") or CHECKS.get(check_id, ("", "UNSPECIFIED"))[1]
             findings.append({
                 "check_id": normalized_check_id,
                 "check_name": check_name,
                 "severity": item.get("severity", "LOW"),
-                "file": str(item.get("file", "") or ""),
+                "file": artifact or "",
                 "line": _coerce_line_number(item.get("line", 0)),
                 "description": str(item.get("description", "")),
                 "snippet": str(item.get("snippet", "") or ""),
             })
         findings = [self._enrich_display_finding(finding) for finding in findings]
+        failed_checks = {
+            str(finding.get("check_id") or "").upper()
+            for finding in findings
+            if str(finding.get("check_id") or "").upper() in CHECKS
+        }
+        for check_id in failed_checks:
+            check_results[CHECKS[check_id][0]] = "FAIL"
 
         return _build_result(
             self.target,
-            files_scanned,
+            status_counts["analyzed"],
             findings,
             check_results=check_results,
             metadata={
@@ -625,6 +860,23 @@ Code snapshot:
                 "configured_provider": llm_config.provider,
                 "truncated": truncated,
                 "engine": "llm",
+                "artifacts": artifact_manifest,
+                "capability_gaps": {
+                    "llm_input_coverage": [
+                        artifact["path"]
+                        for artifact in artifact_manifest
+                        if artifact.get("status") != "analyzed"
+                    ]
+                } if not coverage_complete else {},
+                "rejected_findings_count": len(rejected_findings),
+                "rejected_findings": rejected_findings,
+            },
+            artifact_counts={
+                "files_discovered": files_discovered,
+                "files_analyzed": status_counts["analyzed"],
+                "files_partial": status_counts["partial"],
+                "files_failed": status_counts["failed"],
+                "files_omitted": status_counts["omitted"],
             },
         )
 

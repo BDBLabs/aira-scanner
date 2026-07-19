@@ -87,6 +87,8 @@ Python analysis is parser-backed using Python’s AST and rule-specific structur
 
 JavaScript-family analysis uses parser-backed logic when `esprima` is available and falls back to lighter lexical logic when it is not.
 
+The separate error-inventory and graph layers use pinned Tree-sitter JavaScript, TypeScript, JSX, and TSX grammars. Tree-sitter recovery nodes are preserved as parser diagnostics; lexical recovery remains explicitly partial.
+
 ### Test Coverage Asymmetry
 
 `C14` is evaluated through dedicated test-surface analysis rather than only per-file lexical checks.
@@ -110,6 +112,14 @@ Provider support is deliberately flexible:
 - Groq
 - OpenRouter
 
+For canonical research studies, methodology must be locked before collection:
+
+- the deterministic CLI baseline is `--engine static`, which uses no LLM model; record the model as `none` / not applicable
+- the first-study model-assisted comparison is pinned to `--provider groq --model llama-3.1-8b-instant` when reproduced through the CLI
+- any other LLM-assisted study must pin the provider and exact provider model identifier with CLI arguments or environment variables
+- do not use `--provider auto`, floating model aliases such as `latest` or `current`, or an unset provider model for canonical records
+- capture the scanner version, ruleset version, scoring version, sample manifest, repository ref, resolved commit SHA, scan mode, provider, model, provider health output, and per-sample scan JSON alongside the results
+
 The web app has its own routed provider surface and health checks. The CLI has a local-first provider order and explicit health/probe commands.
 
 ## 7. Fallback Semantics
@@ -131,6 +141,8 @@ The browser-only heuristic path is intentionally treated as the weakest form of 
 The CLI remains useful with no provider configured at all because the static engine is first-class.
 
 If hybrid mode is requested and the LLM path fails, the scanner records that it fell back to static-only behavior.
+
+Browser-only fallback records partial completeness and cannot promote an unevaluated check to `PASS`.
 
 ## 8. Result Semantics
 
@@ -160,9 +172,21 @@ For reproducible studies, findings also include deterministic location metadata:
 - normalized line position within the file
 - parser or heuristic provenance for the context metadata
 
-This metadata supports model-vs-static comparison without sending source code to the aggregate research backend.
+This metadata supports model-vs-static comparison without sending source code to the aggregate research backend. Single-run comparisons can use `aira compare static.json model.json`; repeated location-aware studies should use `aira study run` to preserve raw per-sample JSONL and `aira study compare` to aggregate misses by model, check, boundary type, and sample.
 
-## 9. Severity Semantics
+Comparison version `aira-comparison-v2` uses one-to-one finding matches. A semantic fingerprint is never sufficient by itself: both findings must first identify the same canonical repository-relative artifact. Absolute paths, parent traversal, and basename-only equivalence are not accepted as location identity.
+
+Scan completeness is reported separately from finding counts. `files_discovered` is the in-scope manifest, while `files_analyzed`, `files_partial`, `files_failed`, and `files_omitted` describe what the selected engine actually evaluated. `files_scanned` means fully analyzed artifacts. A rule can be `PASS` only when all in-scope artifacts were fully analyzed with sufficient capability; parse failures, unsupported parser paths, truncation, and omissions preserve `UNKNOWN` for unproven rules.
+
+## 9. Non-Scoring Error Inventory And Graph
+
+`aira inventory-errors` records observations rather than defects. `aira-error-signal-v1` covers handlers, raises/throws, returns and status codes, logs, retries, fallbacks, async ownership, cleanup, and side effects. Every signal includes a canonical artifact, exact region, symbol, structural path, parser health, confidence, and evidence hash. Signal identity excludes line numbers so whitespace and line shifts do not manufacture a new semantic event.
+
+`aira error-graph` projects those signals into `aira-error-graph-v1`. It adds evidence-backed edges for containment, sequence, catching, propagation, wrapping/cause erasure, status returns, logging, retry, fallback, side-effect ordering, async relationships, and conservatively resolved calls. Unresolved or ambiguous calls remain explicit graph nodes.
+
+Neither layer changes canonical check status, FTI-v1, finding thresholds, or research submission claims. Pattern candidates remain a later, separately calibrated phase.
+
+## 10. Severity Semantics
 
 Severity is heuristic and should be interpreted as prioritization guidance, not mathematical truth.
 
@@ -172,7 +196,7 @@ General intent:
 - `MEDIUM`: materially risky ambiguity or structural weakness that needs review
 - `LOW`: softer signal, often distributed fallback or best-effort behavior that may still be acceptable in context
 
-## 10. Research Submission Posture
+## 11. Research Submission Posture
 
 The scanner supports aggregate-only research submission.
 
@@ -202,7 +226,7 @@ Airtable remains supported only as a compatibility fallback.
 
 For Supabase schema v2, AIRA treats the submission stream as append-only and derives a normalized per-check table from the aggregate payload. The server recomputes FTI-v1 and risk bands from `checks_json` rather than trusting caller-supplied scores.
 
-## 11. Claims AIRA Should Not Make
+## 12. Claims AIRA Should Not Make
 
 AIRA should not be used to claim:
 
@@ -224,17 +248,18 @@ not:
 - guarantees
 - all AI-generated code behaves this way
 
-## 12. Known Limitations
+## 13. Known Limitations
 
 The scanner still has important limitations.
 
-- Cross-file and repo-level semantic reasoning remains weaker than single-file structural detection.
+- Cross-file call resolution is intentionally conservative; dynamic, external, and ambiguous calls remain unresolved.
+- The graph records behavior but does not yet classify cross-location relationships as defects or candidates.
 - Browser-only heuristics are intentionally lower-confidence than deterministic server-side analysis.
 - LLM-assisted repo-scale audits can become optimistic or lossy when prompts are truncated.
 - `C07` and `C12` still require human review by design.
 - Benchmark datasets and formal calibration studies are still in progress.
 
-## 13. Practical Interpretation
+## 14. Practical Interpretation
 
 The safest way to use AIRA today is:
 
@@ -243,6 +268,7 @@ The safest way to use AIRA today is:
 3. review `HIGH` findings first
 4. do not suppress the `UNKNOWN` posture on human-review checks
 5. preserve raw JSON outputs when comparing engines or models
-6. preserve provenance about which engine produced the result
+6. use JSONL study rows for multi-sample or multi-model boundary analysis
+7. preserve provenance about which engine produced the result
 
 That posture keeps AIRA useful without letting the tool overclaim what it knows.

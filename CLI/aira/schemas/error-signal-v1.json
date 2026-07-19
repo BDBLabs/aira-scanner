@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aira.bageltech.net/schemas/error-signal-v1.json",
+  "title": "AIRA ErrorSignal v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "signal_id",
+    "artifact",
+    "language",
+    "kind",
+    "region",
+    "symbol",
+    "structural_path",
+    "parser",
+    "confidence",
+    "evidence"
+  ],
+  "properties": {
+    "schema_version": {"const": "aira-error-signal-v1"},
+    "signal_id": {"type": "string", "pattern": "^sig-[a-f0-9]{24}$"},
+    "artifact": {"type": "string", "minLength": 1},
+    "language": {"enum": ["python", "javascript", "typescript"]},
+    "kind": {"type": "string", "minLength": 1},
+    "region": {
+      "type": "object",
+      "required": ["start_line", "start_column", "end_line", "end_column"],
+      "properties": {
+        "start_line": {"type": "integer", "minimum": 1},
+        "start_column": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1},
+        "end_column": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "symbol": {"type": "object"},
+    "structural_path": {"type": "string"},
+    "enclosing_blocks": {"type": "array", "items": {"type": "string"}},
+    "error_identity": {"type": "object"},
+    "outcome": {"type": "object"},
+    "side_effects": {"type": "array", "items": {"type": "string"}},
+    "parser": {"type": "object"},
+    "confidence": {"enum": ["exact", "structural", "lexical"]},
+    "evidence": {"type": "object"},
+    "attributes": {"type": "object"}
+  },
+  "additionalProperties": false
+}

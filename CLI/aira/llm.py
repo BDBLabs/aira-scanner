@@ -62,7 +62,7 @@ def _provider_model(provider: str, config: Optional[LLMConfig] = None) -> Option
     if provider == "nvidia":
         return _env("AIRA_NVIDIA_MODEL", "NVIDIA_MODEL") or "stepfun-ai/step-3.7-flash"
     if provider == "groq":
-        return _env("AIRA_GROQ_MODEL", "GROQ_MODEL")
+        return _env("AIRA_GROQ_MODEL", "GROQ_MODEL") or "llama-3.1-8b-instant"
     if provider == "gemini":
         return _env("AIRA_GEMINI_MODEL", "GEMINI_MODEL") or "gemini-2.5-flash"
     if provider == "openrouter":
@@ -161,6 +161,8 @@ def _ollama_snapshot(config: Optional[LLMConfig] = None) -> Dict[str, Any]:
         "available_models": [],
         "selected_model_available": None,
     }
+    if not selected_model:
+        return snapshot
     try:
         models = _fetch_ollama_models(base_url, timeout_seconds=OLLAMA_DISCOVERY_TIMEOUT_SECONDS)
     except LLMRoutingError as exc:
@@ -177,12 +179,26 @@ def _ollama_snapshot(config: Optional[LLMConfig] = None) -> Dict[str, Any]:
 
 
 def provider_health_snapshot(config: Optional[LLMConfig] = None) -> Dict[str, Any]:
-    configured = [provider for provider in AUTO_PROVIDER_ORDER if _is_configured(provider, config)]
-    ollama_snapshot = _ollama_snapshot(config)
+    selected_provider = config.provider if config and config.provider != "auto" else None
+    providers_to_consider = [selected_provider] if selected_provider else list(AUTO_PROVIDER_ORDER)
+    configured = [provider for provider in providers_to_consider if provider and _is_configured(provider, config)]
+    ollama_snapshot = (
+        _ollama_snapshot(config)
+        if selected_provider in {None, "ollama"}
+        else {
+            "configured": False,
+            "model": None,
+            "base_url": _provider_base_url("ollama"),
+            "reachable": False,
+            "available_models": [],
+            "selected_model_available": None,
+        }
+    )
     return {
         "ok": bool(configured),
         "recommended_provider": "openai-compatible or ollama" if configured and configured[0] in {"openai-compatible", "ollama"} else "nvidia",
         "auto_provider_order": list(AUTO_PROVIDER_ORDER),
+        "selected_provider": selected_provider or "auto",
         "configured_providers": configured,
         "static_fallback": True,
         "providers": {

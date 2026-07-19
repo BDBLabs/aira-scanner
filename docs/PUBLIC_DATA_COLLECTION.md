@@ -36,6 +36,39 @@ What it does:
 5. Submits aggregate-only results to the configured research backend.
 6. If the backend is Supabase, upserts a matching `aira_sample_manifests` row.
 
+
+## Study model and methodology lock
+
+The first-study model-assisted comparison that produced the quoted reduction in surfaced silent errors should be reproduced with the Groq provider model identifier `llama-3.1-8b-instant`. When using the CLI, pin that model explicitly with `--provider groq --model llama-3.1-8b-instant`; do not rely on provider auto-routing or environment defaults.
+
+For canonical deterministic CLI-collected studies, the default methodology is the static scanner:
+
+```bash
+aira collect ./docs/examples/public-collection.yaml \
+  --engine static \
+  --submit-research-aggregate
+```
+
+That path does **not** run samples through an LLM model. In submitted research metadata, the model should therefore be interpreted as `none` / not applicable, while `scan_mode` is `static` and the scanner, ruleset, scoring version, sample manifest, repo ref, and resolved commit SHA provide the reproducibility lock.
+
+To run the first-study model against the complete Study 3 manifest, capture provider health, then run the exact pinned provider/model pair and preserve per-sample JSON outputs:
+
+```bash
+aira health --json \
+  --provider groq \
+  --model llama-3.1-8b-instant > study-3-groq-health.json
+
+aira collect ./path/to/study-3-manifest.yaml \
+  --engine llm \
+  --provider groq \
+  --model llama-3.1-8b-instant \
+  --results-dir ./study-3-groq-llm-results \
+  --output json \
+  --out-file ./study-3-groq-llm-summary.json
+```
+
+If a different model-assisted study is intentionally run, it must be treated as a separate methodology and must pin the provider and exact provider model identifier on the CLI command. Do not use `--provider auto`, floating aliases such as `latest` or `current`, or an unset model for canonical study records.
+
 ## Manifest format
 
 Top-level required fields:

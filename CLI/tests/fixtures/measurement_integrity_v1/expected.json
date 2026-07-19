@@ -1,0 +1,13 @@
+{
+  "schema_version": "aira-measurement-baseline-v1",
+  "artifact": "fixture.py",
+  "scan_completeness": "complete",
+  "findings": [
+    {
+      "check_id": "C03",
+      "line": 7,
+      "severity": "MEDIUM"
+    }
+  ],
+  "must_not_find": ["C01", "C08"]
+}

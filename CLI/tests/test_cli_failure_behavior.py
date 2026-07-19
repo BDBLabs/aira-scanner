@@ -36,6 +36,22 @@ class CliFailureBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["aira_scan"]["summary"]["files_scanned"], 1)
         self.assertEqual(payload["aira_scan"]["metadata"]["mode"], "static")
 
+    def test_malformed_source_emits_incomplete_json_instead_of_empty_scan_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "broken.py"
+            target.write_text("def broken(:\n", encoding="utf-8")
+
+            code, stdout, stderr = _run_cli(["aira", "scan", str(target), "--output", "json"])
+
+        self.assertEqual(code, 2)
+        self.assertEqual(stderr, "")
+        payload = json.loads(stdout)
+        summary = payload["aira_scan"]["summary"]
+        self.assertEqual(summary["files_discovered"], 1)
+        self.assertEqual(summary["files_scanned"], 0)
+        self.assertEqual(summary["files_failed"], 1)
+        self.assertEqual(summary["checks_passed"], 0)
+
     def test_scan_command_missing_path_exits_with_input_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             missing = Path(tmpdir) / "missing.py"

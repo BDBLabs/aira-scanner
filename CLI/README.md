@@ -1,6 +1,6 @@
 # AIRA Scanner — AI-Induced Risk Audit
 
-**Version 1.2.1**  
+**Version 1.3.0**
 *Bagelle Parris Vargas Consulting | bageltech.net*  
 *Jurisprudential AI Governance Initiative*
 
@@ -46,7 +46,7 @@ git clone https://github.com/BDB-Labs/aira-scanner.git
 pip install ./aira-scanner/CLI
 ```
 
-**Requirements:** Python 3.9+, PyYAML
+**Requirements:** Python 3.9+, PyYAML, and the pinned Tree-sitter JavaScript/TypeScript grammars installed with the package
 
 ---
 
@@ -81,6 +81,22 @@ aira scan ./my-project --engine static --output json --out-file static.json
 aira scan ./my-project --engine llm --provider ollama --model minimax-m2:cloud --output json --out-file model.json
 aira compare static.json model.json --output json --out-file suppression-matrix.json
 
+# Inventory error observations without changing C01-C15 results
+aira inventory-errors ./my-project --output json --out-file error-signals.json
+
+# Build the deterministic, evidence-backed error-flow graph
+aira error-graph ./my-project --output json --out-file error-graph.json
+
+# Attach either non-scoring layer to normal scan metadata
+aira scan ./my-project --output json --include-signal-inventory
+aira scan ./my-project --output json --include-error-graph
+
+# Run a manifest-driven study and preserve raw per-sample JSONL
+aira study run study.yaml --engines static,llm \
+  --models ollama:minimax-m2:cloud \
+  --out-file study-results.jsonl
+aira study compare study-results.jsonl --output json --out-file study-comparison.json
+
 # Exclude directories
 aira scan ./my-project --exclude node_modules,dist,build
 
@@ -96,8 +112,13 @@ aira scan ./my-project --output json --submit-research-aggregate \
 # Verify research backend connectivity without writing a record
 aira health --check-research
 
-# Collect a curated public-repo dataset from a manifest
-aira collect ./docs/examples/public-collection.yaml --submit-research-aggregate
+# Collect a curated public-repo dataset from a manifest with the canonical static methodology
+aira collect ./docs/examples/public-collection.yaml --engine static --submit-research-aggregate
+
+# Re-run the first-study LLM methodology against a Study 3 manifest, preserving per-sample JSON
+GROQ_API_KEY=... aira collect ./path/to/study-3-manifest.yaml --engine llm \
+  --provider groq --model llama-3.1-8b-instant \
+  --results-dir ./study-3-llm-results --output json --out-file ./study-3-llm-summary.json
 ```
 
 ### VS Code Extension
@@ -155,9 +176,12 @@ Provider routing is local-first:
 2. Ollama
 3. NVIDIA NIM
 4. Groq
-5. OpenRouter
+5. Gemini
+6. OpenRouter
 
-The web app also now uses a deterministic server-side static scan before falling back to browser-only heuristics. That static scan is parser-backed for Python and, when `esprima` is installed, parser-backed for JavaScript as well.
+The web app also uses a deterministic server-side static scan before falling back to browser-only heuristics. Browser fallback is labeled partial and cannot synthesize PASS for checks it did not evaluate.
+
+For canonical deterministic CLI study collection, use `aira collect ... --engine static`; no LLM model is used, so research metadata should treat the model as not applicable. For the first-study model-assisted comparison that produced the quoted silent-error surfacing ratio, use the pinned Groq model identifier `llama-3.1-8b-instant` with `--provider groq --model llama-3.1-8b-instant`; do not use `auto`, `latest`, `current`, or an unset model. Add `--results-dir` when re-running a study manifest so each sample's full JSON scan output is preserved next to the collection summary.
 
 Useful environment variables:
 
@@ -211,6 +235,7 @@ export AIRTABLE_TOKEN="pat..."
 
 JSON and YAML scan output now includes deterministic finding identity metadata:
 
+- `fingerprint_version`: version of the finding identity contract (`aira-finding-v1`)
 - `fingerprint`: stable per-finding identifier using check, location, snippet, boundary, and enclosing scope
 - `semantic_fingerprint`: location-tolerant identifier for comparing similar findings across runs
 - `location_fingerprint`: check + file + line + boundary identifier
@@ -218,13 +243,54 @@ JSON and YAML scan output now includes deterministic finding identity metadata:
 - `context`: parser/heuristic context including enclosing function/class, line count, normalized line position, and AST path when available
 - `evidence`: normalized snippet evidence and whether the context came from structural parsing or heuristics
 
+Scan summaries distinguish artifacts that were discovered from those that were fully analyzed:
+
+- `files_discovered`: supported artifacts in scope
+- `files_analyzed`: artifacts fully evaluated by the selected engine (`files_scanned` is the backward-compatible alias)
+- `files_partial`: artifacts evaluated only through a reduced-capability or truncated path
+- `files_failed`: artifacts that could not be parsed or read
+- `files_omitted`: artifacts excluded by an engine input limit after discovery
+- `scan_completeness`: `complete`, `partial`, `failed`, or `unavailable`
+
+An aggregate check is `PASS` only when every in-scope artifact was fully analyzed by a capable engine. Findings can still make a check `FAIL` on partial scans, but unevaluated coverage remains `UNKNOWN`.
+
+## Error Inventory And Flow Graph
+
+The proactive analysis layer is separate from canonical C01-C15 findings:
+
+- `aira inventory-errors` emits `aira-error-inventory-v1` with exact regions, stable structural signal IDs, symbol identity, outcomes, error identity, side effects, parser provenance, confidence, and evidence hashes.
+- Python uses the standard AST. JavaScript, TypeScript, JSX, and TSX use pinned Tree-sitter grammars with explicit recovered `parser_error` / `parser_missing` signals. A lexical fallback is labeled `partial` and never proves absence.
+- `aira error-graph` emits `aira-error-graph-v1`, connecting signals through containment, sequence, catch/rethrow/wrap, status return, logging, retry, fallback, side-effect ordering, async ownership, and conservatively resolved calls.
+- Calls that cannot be resolved safely become explicit `unresolved_call` nodes. Every graph edge carries source evidence.
+
+These outputs are observational. They do not change FTI, PASS/FAIL, `--fail-on`, or canonical research claims.
+
 For model-vs-static studies, keep the raw JSON outputs from each run and compare them with:
 
 ```bash
 aira compare static.json model.json --line-window 5
 ```
 
-The comparison output reports static findings, model findings, same-location matches, model misses, model-only findings, static-FAIL/model-PASS check suppression, and counts by AIRA check and boundary type.
+The comparison output reports static findings, model findings, same-location matches, model misses, model-only findings, static-FAIL/model-PASS check suppression, and counts by AIRA check and boundary type. Comparison contract `aira-comparison-v2` enforces one-to-one matches and requires exact canonical repository-relative artifact identity before semantic or line-window matching.
+
+For repeated samples or multi-model studies, use a study manifest and JSONL results:
+
+```yaml
+study_id: boundary-overlap-study
+samples:
+  - sample_id: engine-runtime
+    path: ./fixtures/engine/runtime
+    attribution_class: suspected_ai
+```
+
+```bash
+aira study run study.yaml --engines static,llm \
+  --models ollama:minimax-m2:cloud,openrouter:openai/gpt-4.1 \
+  --out-file study-results.jsonl
+aira study compare study-results.jsonl --line-window 5 --output json --out-file study-comparison.json
+```
+
+Each JSONL row stores the sample metadata, engine/provider/model identity, summary counts, raw `aira_scan` payload, and enriched findings. The study comparison aggregates static-vs-model misses by model, check, boundary type, and sample while preserving the missed finding locations for follow-up review.
 
 ## Research Submission
 
@@ -316,7 +382,7 @@ For the hosted web app, keep `AIRA_ALLOW_PUBLIC_RESEARCH_SUBMISSIONS=false` unle
 If you want the canonical dataset to come from public repos rather than public web users, use the collector:
 
 ```bash
-aira collect ./docs/examples/public-collection.yaml --submit-research-aggregate
+aira collect ./docs/examples/public-collection.yaml --engine static --submit-research-aggregate
 ```
 
 The collector:
@@ -327,6 +393,7 @@ The collector:
 - runs AIRA locally
 - submits aggregate-only results with schema v2 sample metadata
 - upserts `aira_sample_manifests` rows when the backend is Supabase
+- optionally writes complete per-sample JSON scan outputs with `--results-dir`
 
 Useful flags:
 
@@ -334,6 +401,7 @@ Useful flags:
 - `--out-file collection.json`
 - `--keep-repos`
 - `--checkout-root /tmp/aira-collect`
+- `--results-dir ./study-results`
 
 See [docs/PUBLIC_DATA_COLLECTION.md](../docs/PUBLIC_DATA_COLLECTION.md) and [docs/examples/public-collection.yaml](../docs/examples/public-collection.yaml).
 

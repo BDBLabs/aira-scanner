@@ -15,6 +15,9 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 
+FINGERPRINT_VERSION = "aira-finding-v1"
+
+
 CHECK_BOUNDARY_DEFAULTS = {
     "C01": "success_signal",
     "C02": "audit_boundary",
@@ -288,6 +291,7 @@ def enrich_finding(
 
     enriched["boundary_type"] = boundary_type
     enriched["context"] = context
+    enriched["fingerprint_version"] = enriched.get("fingerprint_version") or FINGERPRINT_VERSION
     enriched["fingerprint"] = enriched.get("fingerprint") or _sha256_short(payload)
     enriched["semantic_fingerprint"] = enriched.get("semantic_fingerprint") or _sha256_short(semantic_payload)
     enriched["location_fingerprint"] = enriched.get("location_fingerprint") or _sha256_short(location_payload)

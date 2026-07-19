@@ -2,6 +2,7 @@ import os
 import unittest
 from unittest import mock
 
+from aira.cli import build_parser
 from aira.llm import LLMConfig, provider_health_snapshot
 
 
@@ -45,6 +46,11 @@ class ProviderHealthSnapshotTests(unittest.TestCase):
         self.assertIn("groq", snapshot["configured_providers"])
         self.assertEqual(snapshot["providers"]["groq"]["model"], "llama-3.1-8b-instant")
 
+    def test_cli_accepts_gemini_as_explicit_provider(self):
+        args = build_parser().parse_args(["scan", "sample.py", "--engine", "llm", "--provider", "gemini"])
+
+        self.assertEqual(args.provider, "gemini")
+
     def test_groq_env_model_overrides_default(self):
         env = {"AIRA_GROQ_API_KEY": "test-key", "AIRA_GROQ_MODEL": "openai/gpt-oss-120b"}
         with mock.patch.dict(os.environ, env, clear=False):
@@ -71,6 +77,23 @@ class ProviderHealthSnapshotTests(unittest.TestCase):
 
         self.assertIn("ollama", snapshot["configured_providers"])
         self.assertFalse(snapshot["providers"]["ollama"]["selected_model_available"])
+
+    def test_explicit_provider_health_only_reports_selected_provider_as_configured(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AIRA_OPENAI_BASE_URL": "http://localhost:1234/v1",
+                "AIRA_OPENAI_MODEL": "gpt-oss-120b",
+                "AIRA_GROQ_API_KEY": "test-key",
+            },
+            clear=False,
+        ):
+            snapshot = provider_health_snapshot(LLMConfig(provider="groq", model="llama-3.1-8b-instant"))
+
+        self.assertTrue(snapshot["ok"])
+        self.assertEqual(snapshot["selected_provider"], "groq")
+        self.assertEqual(snapshot["configured_providers"], ["groq"])
+        self.assertEqual(snapshot["providers"]["groq"]["model"], "llama-3.1-8b-instant")
 
 
 if __name__ == "__main__":
