@@ -23,26 +23,26 @@ AIRA implements 15 checks derived from empirical observation of these patterns a
 ### Homebrew
 
 ```bash
-brew install BDB-Labs/aira-scanner/aira
+brew install BDBLabs/aira-scanner/aira
 ```
 
 Or tap once and use the short name:
 
 ```bash
-brew tap BDB-Labs/aira-scanner
+brew tap BDBLabs/aira-scanner
 brew install aira
 ```
 
 For the latest unreleased code:
 
 ```bash
-brew install --HEAD BDB-Labs/aira-scanner/aira
+brew install --HEAD BDBLabs/aira-scanner/aira
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/BDB-Labs/aira-scanner.git
+git clone https://github.com/BDBLabs/aira-scanner.git
 pip install ./aira-scanner/CLI
 ```
 
@@ -480,7 +480,7 @@ aira_scan:
 # GitHub Actions example
 - name: Run AIRA scan
   run: |
-    pip install "git+https://github.com/BDB-Labs/aira-scanner.git#subdirectory=CLI"
+    pip install "git+https://github.com/BDBLabs/aira-scanner.git#subdirectory=CLI"
     aira scan . --output json --out-file aira-report.json
   # Exit code 1 if HIGH severity findings found
 ```

@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 
 
-REPO = "BDB-Labs/aira-scanner"
+REPO = "BDBLabs/aira-scanner"
 FORMULA_PATH = Path(__file__).resolve().parents[1] / "Formula" / "aira.rb"
 VERSION_PATH = Path(__file__).resolve().parents[1] / "CLI" / "pyproject.toml"
 

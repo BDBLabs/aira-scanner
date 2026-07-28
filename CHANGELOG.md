@@ -24,7 +24,7 @@ Parity release: the CLI, the web API, and the published Homebrew build now run t
 ### Packaging and docs
 
 - Moved the scanner package into `CLI/` and refreshed the docs
-- Published a dedicated `homebrew-aira-scanner` tap so Homebrew can auto-tap on `brew install BDB-Labs/aira-scanner/aira`
+- Published a dedicated `homebrew-aira-scanner` tap so Homebrew can auto-tap on `brew install BDBLabs/aira-scanner/aira`
 - Removed inaccurate PyPI install instructions; AIRA is distributed via Homebrew and source installs only
 - Removed the stale Gemini free-tier comment from the web scan route
 

@@ -47,8 +47,8 @@ aira = "aira.cli:main"
 
 [project.urls]
 Homepage = "https://bageltech.net"
-Repository = "https://github.com/BDB-Labs/aira-scanner"
-"Bug Tracker" = "https://github.com/BDB-Labs/aira-scanner/issues"
+Repository = "https://github.com/BDBLabs/aira-scanner"
+"Bug Tracker" = "https://github.com/BDBLabs/aira-scanner/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

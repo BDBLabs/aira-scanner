@@ -3,11 +3,11 @@ class Aira < Formula
 
   desc "Static analysis for AI-generated code failure patterns"
   homepage "https://aira.bageltech.net"
-  url "https://github.com/BDB-Labs/aira-scanner/archive/refs/tags/v1.3.0.tar.gz"
+  url "https://github.com/BDBLabs/aira-scanner/archive/refs/tags/v1.3.0.tar.gz"
   version "1.3.0"
   sha256 "ebd380727dee25a18ce21eb0bc4a8de6ee2a1b266e677e6ab51984ba5e4593c9"
   license "MIT"
-  head "https://github.com/BDB-Labs/aira-scanner.git", branch: "main"
+  head "https://github.com/BDBLabs/aira-scanner.git", branch: "main"
 
   depends_on "libyaml"
   depends_on "python@3.13"

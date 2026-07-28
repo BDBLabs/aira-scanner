@@ -90,13 +90,13 @@ The versioned error-signal inventory and deterministic error-flow graph are live
 Via Homebrew:
 
 ```bash
-brew install BDB-Labs/aira-scanner/aira
+brew install BDBLabs/aira-scanner/aira
 ```
 
 Or from source:
 
 ```bash
-git clone https://github.com/BDB-Labs/aira-scanner.git
+git clone https://github.com/BDBLabs/aira-scanner.git
 pip install ./aira-scanner/CLI
 ```
 

@@ -16,7 +16,7 @@ AIRA identifies systems that:
 - Command-line linter + rule engine
 - Detects 15 fail-soft pattern categories (C01–C15)
 - Works on Python, JavaScript, and TypeScript codebases
-- Published via Homebrew (`brew install BDB-Labs/aira-scanner/aira`); source installs via `pip install ./CLI`
+- Published via Homebrew (`brew install BDBLabs/aira-scanner/aira`); source installs via `pip install ./CLI`
 - Research-driven: empirical validation in progress
 
 ## Repository Structure
