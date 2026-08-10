@@ -18,7 +18,7 @@ The goal is not to create a formal semantics document. The goal is to make each 
 | C08 | Unsupervised Background Tasks | Automated | Async or background work lacks supervision |
 | C09 | Environment-Dependent Safety | Automated | Safety is relaxed in local/dev/test/staging paths |
 | C10 | Startup Integrity | Automated | Startup/init catches failure and continues |
-| C11 | Deterministic Reasoning Drift | Automated | Decision paths use non-deterministic model settings |
+| C11 | Deterministic Reasoning Drift | Automated | Decision paths use non-deterministic model settings |. 
 | C12 | Source-to-Output Lineage | Human review | Outputs lack traceable link to their input or reasoning basis |
 | C13 | Confidence Misrepresentation | Automated | Output is inferred or degraded without explicit confidence posture |
 | C14 | Test Coverage Asymmetry | Automated | Failure-path tests lag happy-path tests |
