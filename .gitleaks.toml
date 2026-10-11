@@ -1,0 +1,33 @@
+# gitleaks allowlist — two known throwaway Airtable values, and ONLY those.
+#
+# A previous deploy of the web UI hardcoded real-format Airtable credentials in
+# index.html / index_API_ACTIVE.html / aira_phase2.html before being switched to
+# env vars (documented in .env.example). Those files have since been replaced and
+# HEAD is placeholder-only, but the values survive in git history, which is why
+# gitleaks reports them.
+#
+# Per the repository owner these were never used and never live, so nothing needs
+# rotating. They are allowlisted rather than purged from history because a rewrite
+# does not help on a public repo (clones already hold the commits) and would churn
+# every unrelated commit.
+#
+# Deliberately value-exact, NOT path-scoped: a `paths` allowlist for those HTML
+# files would silently suppress any real credential added to them later, which is
+# exactly what this check exists to catch. Each regex anchors an entire throwaway
+# value, so a genuine Airtable key committed anywhere is still reported.
+#
+# `useDefault = true` is load-bearing. Without it a custom config REPLACES the
+# default rule set rather than extending it, which makes gitleaks scan with zero
+# rules and report 'no leaks found' for everything. That was verified the hard way.
+
+title = "AIRA allowlist — historical throwaway Airtable credentials"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Historical throwaway Airtable credentials (never used, never live)."
+regexes = [
+    '''^appUaAjIWJRuBfVJb$''',
+    '''^patTbhTfRgNOmIehf\.6cf77526935f75c7046c8fa414c829af88aaba87e99f08216f45b049804fb7db$''',
+]
