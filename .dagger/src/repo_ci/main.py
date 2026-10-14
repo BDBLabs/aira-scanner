@@ -80,7 +80,27 @@ cd /src/CLI
             .with_directory("/src", source)
             .with_workdir("/src")
             .with_exec(["sh", "-lc", "test -d .git || { echo '.git history is required'; exit 42; }"])
-            .with_exec(["gitleaks", "detect", "--redact", "-v", "--source", "."])
+            # Config is named explicitly rather than relying on gitleaks
+            # auto-discovery, and it is the CONTAINER-ABSOLUTE path for a reason:
+            # gitleaks resolves a relative --config against the process cwd, not
+            # against --source, so `--config .gitleaks.toml` FATALs with "unable
+            # to load gitleaks config" the moment the working directory changes.
+            # (Auto-discovery, by contrast, does resolve against --source — so
+            # the bare invocation was already robust; this makes the dependency
+            # explicit without giving up that robustness.) The workdir is /src,
+            # so /src/.gitleaks.toml is the checked-in file.
+            .with_exec(
+                [
+                    "gitleaks",
+                    "detect",
+                    "--redact",
+                    "-v",
+                    "--config",
+                    "/src/.gitleaks.toml",
+                    "--source",
+                    ".",
+                ]
+            )
         )
         await ctr.stdout()
         return "secrets: passed"
