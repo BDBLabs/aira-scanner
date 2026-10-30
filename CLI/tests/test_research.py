@@ -11,8 +11,8 @@ from urllib import error
 from aira.cli import main
 from aira.research import (
     build_aggregate_submission_fields,
-    build_submission_bundle,
     build_structured_submission_record,
+    build_submission_bundle,
     check_airtable_connection,
     check_research_connection,
     compute_fti_v1,
@@ -202,7 +202,7 @@ class ResearchHelpersTests(unittest.TestCase):
         result = _sample_result()
         with tempfile.TemporaryDirectory() as tmpdir:
             sink = Path(tmpdir) / "research.jsonl"
-            with mock.patch.dict(os.environ, {"AIRA_RESEARCH_JSONL": str(sink)}, clear=False):
+            with mock.patch.dict(os.environ, {"AIRA_RESEARCH_JSONL": str(sink)}, clear=True):
                 response = submit_aggregate_research(result)
 
             lines = sink.read_text(encoding="utf-8").splitlines()
