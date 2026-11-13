@@ -354,3 +354,7 @@ See `CONTRIBUTING.md` for detailed guidelines.
 
 Read and obey [AI_ATTRIBUTION.md](AI_ATTRIBUTION.md) before creating commits, PRs, reviews, issues, releases, or other attributable GitHub artifacts. AI-authored commits must name the exact model/version. AI-drafted PRs require review of the final head SHA by a different model, and both models must be identified.
 <!-- END OWNER AI ATTRIBUTION POLICY -->
+
+## Documentation Steward and ADR governance (proposed)
+
+For material orchestration, read [Documentation Steward Policy](docs/orchestration/DOCUMENTATION_STEWARD_POLICY.md) and update [Engagements](docs/orchestration/ENGAGEMENTS.md). Delegate drafting to an available smaller capable model; the orchestrator owns accuracy and authorized humans retain consequential acceptance. Preserve existing ADR conventions, cross-model review and all existing governance. This is not active until independently reviewed and merged.
