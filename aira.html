@@ -819,6 +819,36 @@ footer {
 
 .error-panel.show { display: block; }
 
+/* ── SCAN AVAILABILITY + INPUT DISCLOSURE ── */
+.availability-panel {
+  display: block;
+  margin: 1.25rem 1.5rem 0;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+.availability-panel.available { background: var(--green-bg); color: var(--green); }
+.availability-panel.unavailable { background: var(--yellow-bg); color: var(--yellow); }
+.scan-notice,
+.result-truncation {
+  display: none;
+  margin: 1rem 1.5rem 0;
+  padding: 0.8rem 1.1rem;
+  background: var(--yellow-bg);
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  line-height: 1.55;
+  color: var(--yellow);
+}
+.scan-notice.show,
+.result-truncation.show { display: block; }
+.scan-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
 /* ── FADE IN ── */
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(16px); }
@@ -921,11 +951,19 @@ def save_record(db, record):
         <option value="javascript">JavaScript</option>
         <option value="typescript">TypeScript</option>
       </select>
-      <button class="scan-btn" id="scan-btn" onclick="runScan()">
+      <button class="scan-btn" id="scan-btn" onclick="runScan()" disabled>
         <div class="spinner"></div>
         <span class="btn-text">Run AIRA Scan</span>
       </button>
     </div>
+
+    <!-- Server-side scan availability -->
+    <div class="availability-panel unavailable" id="availability-panel" role="status" aria-live="polite">
+      Checking server-side scan availability…
+    </div>
+
+    <!-- Input-boundary disclosure -->
+    <div class="scan-notice" id="scan-notice" role="status" aria-live="polite"></div>
 
     <!-- Loading -->
     <div class="scan-progress" id="scan-progress">
@@ -944,6 +982,7 @@ def save_record(db, record):
         <div class="results-title">Scan Results</div>
         <div class="check-grid" id="check-grid"></div>
         <div class="severity-row" id="severity-row"></div>
+        <div class="result-truncation" id="result-truncation"></div>
       </div>
 
       <!-- Research opt-in -->
@@ -1025,14 +1064,70 @@ def save_record(db, record):
 
 <script>
 // ── CONFIG ──────────────────────────────────────────────────────
-// Replace with your Airtable details
-const AIRTABLE_BASE_ID = 'YOUR_BASE_ID';
-const AIRTABLE_TABLE   = 'AIRA Research';
-const AIRTABLE_TOKEN   = 'YOUR_AIRTABLE_PAT'; // set this server-side ideally
+// This legacy page never holds provider or storage credentials.
+// Scanning goes through /api/scan; availability comes from /api/health;
+// research submissions go through /api/research.
+const MAX_SCAN_CHARS = 8000;
 
 // ── STATE ───────────────────────────────────────────────────────
-let uploadedCode = '';
-let lastResult   = null;
+let uploadedCode  = '';
+let lastResult    = null;
+let scanAvailable = false;
+
+// ── SERVER-SIDE SCAN AVAILABILITY ───────────────────────────────
+function setScanAvailability(available, message) {
+  const panel = document.getElementById('availability-panel');
+  const btn = document.getElementById('scan-btn');
+  scanAvailable = available;
+  btn.disabled = !available;
+  panel.className = `availability-panel ${available ? 'available' : 'unavailable'}`;
+  panel.textContent = message;
+}
+
+async function checkScanAvailability() {
+  const unavailableDetail =
+    'This page must be served with /api/health and /api/scan plus server-side provider environment variables. ' +
+    'Opening this file directly, or deploying without a configured provider, disables cloud scanning. ' +
+    'Use the CLI for local scans.';
+
+  try {
+    const response = await fetch('/api/health');
+    if (!response.ok) {
+      setScanAvailability(false, `Cloud scan is unavailable: /api/health returned HTTP ${response.status}. ${unavailableDetail}`);
+      return;
+    }
+
+    const health = await response.json().catch(() => ({}));
+    const providers = Array.isArray(health.configured_providers) ? health.configured_providers : [];
+    if (health.ok !== true || providers.length === 0) {
+      setScanAvailability(false, `Cloud scan is unavailable: no server-side provider is configured. ${unavailableDetail}`);
+      return;
+    }
+
+    setScanAvailability(
+      true,
+      `Server-side scan is available via /api/scan (provider: ${providers[0]}). Provider keys stay on the server and are never sent to this page.`
+    );
+  } catch (err) {
+    setScanAvailability(false, `Cloud scan is unavailable: /api/health could not be reached (${err.message}). ${unavailableDetail}`);
+  }
+}
+
+function setTruncationNotice(truncated, sourceChars, scannedChars) {
+  const notice = document.getElementById('scan-notice');
+  if (!truncated) {
+    notice.className = 'scan-notice';
+    notice.textContent = '';
+    return;
+  }
+
+  const omitted = sourceChars - scannedChars;
+  notice.className = 'scan-notice show';
+  notice.textContent =
+    `Partial scan: the server-side model was given only the first ${scannedChars.toLocaleString()} of ` +
+    `${sourceChars.toLocaleString()} input characters; ${omitted.toLocaleString()} characters were omitted. ` +
+    `Results may miss findings outside that prefix. Use the CLI for a full local scan.`;
+}
 
 // ── TABS ────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(tab => {
@@ -1096,6 +1191,11 @@ function detectLanguage(code) {
 
 // ── MAIN SCAN ────────────────────────────────────────────────────
 async function runScan() {
+  if (!scanAvailable) {
+    showError('Cloud scanning is unavailable. The availability notice above explains the required server-side configuration; use the CLI for local scans.');
+    return;
+  }
+
   const activeTab = document.querySelector('.tab.active').dataset.tab;
   const code = activeTab === 'paste'
     ? document.getElementById('code-input').value.trim()
@@ -1113,6 +1213,11 @@ async function runScan() {
 
   const langSelect = document.getElementById('lang-select').value;
   const lang = langSelect === 'auto' ? detectLanguage(code) : langSelect;
+
+  const sourceChars = code.length;
+  const truncated = sourceChars > MAX_SCAN_CHARS;
+  const scannedCode = truncated ? code.slice(0, MAX_SCAN_CHARS) : code;
+  setTruncationNotice(truncated, sourceChars, scannedCode.length);
 
   // UI: loading state
   const btn = document.getElementById('scan-btn');
@@ -1145,7 +1250,11 @@ async function runScan() {
   }, 700);
 
   try {
-    const result = await callAIRAScanner(code, lang);
+    const result = await callAIRAScanner(scannedCode, lang, {
+      truncated,
+      sourceChars,
+      scannedChars: scannedCode.length
+    });
     clearInterval(labelInterval);
     progress.classList.remove('show');
     renderResults(result);
@@ -1155,14 +1264,14 @@ async function runScan() {
     progress.classList.remove('show');
     showError(`Scan failed: ${err.message}`);
   } finally {
-    btn.disabled = false;
+    btn.disabled = !scanAvailable;
     btn.classList.remove('loading');
     btn.querySelector('.btn-text').textContent = 'Run AIRA Scan';
   }
 }
 
-// ── CLAUDE API CALL ───────────────────────────────────────────────
-async function callAIRAScanner(code, lang) {
+// ── SERVER-SIDE SCAN CALL ─────────────────────────────────────────
+async function callAIRAScanner(code, lang, inputMeta = {}) {
   const systemPrompt = `You are AIRA — the AI-Induced Risk Audit scanner v1.2.
 
 Analyze the provided ${lang} code against all 15 AIRA checks. Return ONLY valid JSON matching this exact schema:
@@ -1225,30 +1334,41 @@ IMPORTANT:
 - Include line numbers when identifiable
 - Return ONLY the JSON object, no preamble or explanation`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetch('/api/scan', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
+      provider: 'auto',
       system: systemPrompt,
-      messages: [{ role: 'user', content: `Analyze this ${lang} code:\n\n${code.slice(0, 8000)}` }]
+      prompt: `Analyze this ${lang} code:\n\n${code}`
     })
   });
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `API error ${response.status}`);
+    throw new Error(err.error?.message || `Server scan error ${response.status}`);
   }
 
   const data = await response.json();
-  const text = data.content?.map(b => b.text || '').join('') || '';
-  const clean = text.replace(/```json|```/g, '').trim();
+  const clean = String(data.text || '').replace(/```json|```/g, '').trim();
+  const sourceChars = inputMeta.sourceChars ?? code.length;
+  const scannedChars = inputMeta.scannedChars ?? code.length;
 
   try {
-    return JSON.parse(clean);
+    return {
+      ...JSON.parse(clean),
+      meta: {
+        engine: data.provider || 'auto',
+        engine_label: 'Server-side routed scan',
+        note: 'The provider request was made by /api/scan using server-side environment variables; no API key was sent by the browser.',
+        input_truncated: Boolean(inputMeta.truncated),
+        source_chars: sourceChars,
+        scanned_chars: scannedChars,
+        omitted_chars: Math.max(0, sourceChars - scannedChars)
+      }
+    };
   } catch {
-    throw new Error('Could not parse scanner response. Please try again.');
+    throw new Error('Could not parse server scan response. Please try again.');
   }
 }
 
@@ -1295,6 +1415,18 @@ function renderResults(result) {
     <span class="sev-badge low">● ${l} LOW</span>
     <span style="font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);margin-left:auto">${summary.total || 0} total findings</span>
   `;
+
+  const truncationEl = document.getElementById('result-truncation');
+  if (result.meta?.input_truncated) {
+    truncationEl.textContent =
+      `Partial scan: analyzed the first ${Number(result.meta.scanned_chars || 0).toLocaleString()} of ` +
+      `${Number(result.meta.source_chars || 0).toLocaleString()} characters; ` +
+      `${Number(result.meta.omitted_chars || 0).toLocaleString()} characters were omitted.`;
+    truncationEl.classList.add('show');
+  } else {
+    truncationEl.textContent = '';
+    truncationEl.classList.remove('show');
+  }
 
   // Findings list
   const list = document.getElementById('findings-list');
@@ -1349,46 +1481,40 @@ async function submitResearch() {
   const checks = lastResult.checks || {};
   const summary = lastResult.summary || {};
 
-  // Build anonymized payload — NO source code
+  // Build anonymized payload — NO source code and NO browser-side storage secret.
   const payload = {
-    fields: {
-      'Submitted At': new Date().toISOString(),
-      'Checks JSON': JSON.stringify(checks),
-      'High Count': summary.high || 0,
-      'Medium Count': summary.medium || 0,
-      'Low Count': summary.low || 0,
-      'Total Findings': summary.total || 0,
-      'Checks Failed': Object.values(checks).filter(v => v === 'FAIL').length,
-      'Source': 'aira.bageltech.net'
-    }
+    submitted_at: new Date().toISOString(),
+    checks,
+    summary,
+    meta: lastResult.meta || {},
+    source: 'aira.bageltech.net'
   };
 
   try {
-    // Airtable REST API submission
-    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE)}`, {
+    const res = await fetch('/api/research', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${AIRTABLE_TOKEN}`,
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
 
-    if (!res.ok) throw new Error('Submission failed');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `Research submission error ${res.status}`);
+    }
+
     document.getElementById('research-success').style.display = 'inline';
     document.querySelector('.research-actions').querySelectorAll('button').forEach(b => b.disabled = true);
-  } catch {
-    // Fallback: open mailto with summary
-    const body = encodeURIComponent(
-      `AIRA Research Submission\n\nChecks:\n${JSON.stringify(checks, null, 2)}\n\nSummary:\n${JSON.stringify(summary, null, 2)}`
-    );
-    window.location.href = `mailto:bill@bageltech.net?subject=AIRA Research Submission&body=${body}`;
+  } catch (err) {
+    showError(`Research submission unavailable: ${err.message} No browser-side storage token was used.`);
   }
 }
 
 function dismissResearch() {
   document.getElementById('research-panel').classList.remove('show');
 }
+
+// Probe the server-side routes on load; file:// or unconfigured deploys stay disabled.
+checkScanAvailability();
 
 // ── UTILS ────────────────────────────────────────────────────────
 function showError(msg) {
