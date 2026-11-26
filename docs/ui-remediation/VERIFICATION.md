@@ -2,7 +2,8 @@
 
 Baseline: `762ed246d018000ea7994784ca7b46993b879908`
 Branch: `fix/ui-remediation/aira-scanner-p0`
-Final head SHA: resolve with `git rev-parse HEAD`; the implementation commit SHA is recorded in the follow-up evidence commit, because a commit cannot contain its own SHA.
+Implementation commit: `31649ba65e4e4a3207916f6571aca7f2f8c177e9`.
+Final head SHA: resolve with `git rev-parse HEAD`; this evidence commit cannot contain its own SHA, so no value is guessed here.
 
 Classification legend: `passed`, `failed`, `blocked`, `not-run`.
 

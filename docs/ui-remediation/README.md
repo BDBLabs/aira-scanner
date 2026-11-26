@@ -7,8 +7,8 @@ Work item: `AIR-01` (P0, direct browser-side Anthropic call and silent 8k trunca
 - Worktree: `/Users/temporary/ui-ux-review/worktrees/wave2/BDBLabs__aira-scanner`
 - Branch: `fix/ui-remediation/aira-scanner-p0`
 - Baseline HEAD (verified before editing): `762ed246d018000ea7994784ca7b46993b879908`
-- Implementation commit: recorded in the follow-up evidence commit after creation; no SHA is guessed here.
-- Final head SHA: resolve with `git rev-parse HEAD`; a commit cannot contain its own SHA.
+- Implementation commit: `31649ba65e4e4a3207916f6571aca7f2f8c177e9` (code, tests, docs, and screenshots).
+- Evidence commit: this commit records the implementation SHA; resolve its own head SHA with `git rev-parse HEAD`. A commit cannot contain its own SHA, so no value is guessed here.
 - Drafting agent: Big Pickle (`big-pickle`), provider `opencode`, surface OpenCode coding agent. Exact model version was not exposed to the agent.
 - Reviewing model: none assigned. No PR, merge, push, or deploy was created. If an AI-drafted PR is opened, the repository's `AI_ATTRIBUTION.md` cross-model review requirement applies to the final head SHA.
 
